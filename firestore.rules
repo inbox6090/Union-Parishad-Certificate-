@@ -40,6 +40,23 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // V2 private citizen profiles. Roles must be provisioned in Firebase Auth custom claims.
+    // Do not trust localStorage, client-supplied roles, or user-editable Firestore profiles.
+    function canManageCitizenProfiles() {
+      return request.auth != null && request.auth.token.role in
+        ['admin', 'developer', 'chairman', 'secretary', 'operator', 'udc'];
+    }
+    match /citizenProfilesV2/{profileId} {
+      allow read: if canManageCitizenProfiles();
+      allow create: if canManageCitizenProfiles()
+        && request.resource.data.id == profileId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 200;
+      allow update, delete: if false;
+    }
+
     // -------------------- CERTIFICATES COLLECTION --------------------
     match /certificates/{certId} {
       // Allow read (get & list) for public verification, searching, and dashboard pending count
