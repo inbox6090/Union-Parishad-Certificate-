@@ -1,202 +1,118 @@
 rules_version = '2';
 service cloud.firestore {
-  match /databases/{database}/documents {
+ match /databases/{database}/documents {
+  function signedIn(){return request.auth != null;}
+  function role(){return signedIn() && request.auth.token.role is string ? request.auth.token.role : '';}
+  function admin(){return role() in ['admin','developer'];}
+  function reviewer(){return admin() || role() in ['chairman','secretary'];}
+  function staff(){return reviewer() || role() in ['operator','udc','editor'];}
+  function applicantStaff(){return role() in ['admin','developer','chairman','secretary','operator','udc'];}
+  function approvedService(serviceId){
+   return exists(/databases/$(database)/documents/approvedApplicationServices/$(serviceId))
+    && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.enabled == true
+    && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.formVerified == true;
+  }
+  // No client can grant itself a role: Firebase Auth custom claims must be set by trusted Admin SDK.
+  match /{document=**}{allow read,write: if false;}
 
-    // Default deny all unhandled paths
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // --- Helper Functions ---
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function hasRole(role) {
-      return isSignedIn() && (
-        (request.auth.token.roles != null && request.auth.token.roles[role] == true) ||
-        (request.auth.token.role == role) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == role)
-      );
-    }
-
-    function isAdmin() {
-      return hasRole('admin') || hasRole('developer');
-    }
-
-    function isChairmanOrSecretary() {
-      return isAdmin() || hasRole('chairman') || hasRole('secretary');
-    }
-
-    function isStaff() {
-      return isChairmanOrSecretary() || hasRole('operator') || hasRole('udc') || hasRole('editor');
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // V2 private citizen profiles. Roles must be provisioned in Firebase Auth custom claims.
-    // Do not trust localStorage, client-supplied roles, or user-editable Firestore profiles.
-    function canManageCitizenProfiles() {
-      return request.auth != null && request.auth.token.role in
-        ['admin', 'developer', 'chairman', 'secretary', 'operator', 'udc'];
-    }
-    match /citizenProfilesV2/{profileId} {
-      allow read: if canManageCitizenProfiles();
-      allow create: if canManageCitizenProfiles()
-        && request.resource.data.id == profileId
-        && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 200;
-      allow update, delete: if false;
-    }
-
-    // Staff-only service approvals: provision via trusted admin SDK, not client.
-    function approvedService(serviceId) {
-      return exists(/databases/$(database)/documents/approvedApplicationServices/$(serviceId))
-        && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.enabled == true
-        && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.formVerified == true;
-    }
-    match /approvedApplicationServices/{serviceId} {
-      allow get, list: if canManageCitizenProfiles();
-      allow create, update, delete: if false;
-    }
-
-    // Separate application collection; owner is a trusted Firebase Auth UID.
-    match /citizenApplicationsV1/{applicationId} {
-      allow get, list: if canManageCitizenProfiles()
-        && resource.data.ownerUid == request.auth.uid;
-      allow create: if canManageCitizenProfiles()
+  match /citizenProfilesV2/{id}{
+   allow get,list: if applicantStaff();
+   allow create: if applicantStaff() && request.resource.data.id == id
+     && request.resource.data.createdBy == request.auth.uid
+     && request.resource.data.name is string
+     && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 200;
+   allow update,delete: if false;
+  }
+  match /approvedApplicationServices/{id}{
+   allow get,list: if applicantStaff();
+   allow create,update,delete: if false;
+  }
+  match /citizenApplicationsV1/{id}{
+   allow get,list: if applicantStaff() && resource.data.ownerUid == request.auth.uid;
+   allow create: if applicantStaff()
+     && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
+     && request.resource.data.id == id && request.resource.data.ownerUid == request.auth.uid
+     && request.resource.data.status == 'draft'
+     && request.resource.data.serviceId is string
+     && request.resource.data.serviceId.matches('^service_[0-9]+$')
+     && request.resource.data.citizenId is string
+     && approvedService(request.resource.data.serviceId)
+     && exists(/databases/$(database)/documents/citizenProfilesV2/$(request.resource.data.citizenId))
+     && request.resource.data.fieldValues is map
+     && request.resource.data.fieldValues.keys().hasOnly(['reason'])
+     && request.resource.data.fieldValues.reason is string
+     && request.resource.data.fieldValues.reason.size() <= 1500
+     && request.resource.data.createdAt is string
+     && request.resource.data.updatedAt is string;
+   allow update: if applicantStaff()
+     && resource.data.ownerUid == request.auth.uid
+     && resource.data.status == 'draft'
+     && request.resource.data.ownerUid == resource.data.ownerUid
+     && request.resource.data.id == resource.data.id
+     && request.resource.data.serviceId == resource.data.serviceId
+     && request.resource.data.citizenId == resource.data.citizenId
+     && request.resource.data.schemaVersion == resource.data.schemaVersion
+     && request.resource.data.createdAt == resource.data.createdAt
+     && approvedService(resource.data.serviceId)
+     && (
+       (request.resource.data.status == 'draft'
         && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
-        && request.resource.data.id == applicationId
-        && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.status == 'draft'
-        && request.resource.data.serviceId is string
-        && request.resource.data.serviceId.matches('^service_[0-9]+
-    match /certificates/{certId} {
-      // Allow read (get & list) for public verification, searching, and dashboard pending count
-      allow read: if true;
-      // Allow create and update for app forms and approval workflow
-      allow create, update: if true;
-      // Deletion restricted to admins
-      allow delete: if isAdmin() || true;
-    }
-
-    // -------------------- CITIZEN MASTER DATABASE --------------------
-    match /citizens/{citizenId} {
-      allow read, write: if true;
-    }
-
-    // -------------------- CONFIGS COLLECTION --------------------
-    match /configs/{configId} {
-      allow read, write: if true;
-    }
-
-    match /configs/public/{docId} {
-      allow read, write: if true;
-    }
-
-    match /configs/secrets/{docId} {
-      allow read, write: if true;
-    }
-
-    // -------------------- RESTRICTED ADMINISTRATIVE COLLECTIONS --------------------
-    match /apiKeys/{docId} {
-      allow read, write: if true;
-    }
-
-    match /webhooks/{docId} {
-      allow read, write: if true;
-    }
-
-    match /backups/{docId} {
-      allow read, write: if true;
-    }
+        && request.resource.data.fieldValues == resource.data.fieldValues)
+       ||
+       (request.resource.data.status == 'submitted'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt','submittedAt'])
+        && request.resource.data.submittedAt is string)
+     );
+   allow delete: if false;
   }
-}
 
-
-)
-        && approvedService(request.resource.data.serviceId)
-        && exists(/databases/$(database)/documents/citizenProfilesV2/$(request.resource.data.citizenId))
-        && request.resource.data.fieldValues is map
-        && request.resource.data.fieldValues.keys().hasOnly(['reason'])
-        && request.resource.data.fieldValues.reason is string
-        && request.resource.data.fieldValues.reason.size() <= 1500
-        && request.resource.data.createdAt is string
-        && request.resource.data.updatedAt is string;
-      allow update: if canManageCitizenProfiles()
-        && resource.data.ownerUid == request.auth.uid
-        && resource.data.status == 'draft'
-        && request.resource.data.ownerUid == resource.data.ownerUid
-        && request.resource.data.id == resource.data.id
-        && request.resource.data.serviceId == resource.data.serviceId
-        && request.resource.data.createdAt == resource.data.createdAt
-        && approvedService(resource.data.serviceId)
-        && (
-          (request.resource.data.status == 'draft'
-           && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
-           && request.resource.data.fieldValues is map
-           && request.resource.data.fieldValues.keys().hasOnly(['reason'])
-           && request.resource.data.fieldValues.reason is string
-           && request.resource.data.fieldValues.reason.size() <= 1500
-           && exists(/databases/$(database)/documents/citizenProfilesV2/$(request.resource.data.citizenId)))
-          ||
-          (request.resource.data.status == 'submitted'
-           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt','submittedAt'])
-           && request.resource.data.submittedAt is string
-           && exists(/databases/$(database)/documents/citizenProfilesV2/$(resource.data.citizenId)))
-        );
-      allow delete: if false;
-    }
-
-    // -------------------- CERTIFICATES COLLECTION --------------------
-    match /certificates/{certId} {
-      // Allow read (get & list) for public verification, searching, and dashboard pending count
-      allow read: if true;
-      // Allow create and update for app forms and approval workflow
-      allow create, update: if true;
-      // Deletion restricted to admins
-      allow delete: if isAdmin() || true;
-    }
-
-    // -------------------- CITIZEN MASTER DATABASE --------------------
-    match /citizens/{citizenId} {
-      allow read, write: if true;
-    }
-
-    // -------------------- CONFIGS COLLECTION --------------------
-    match /configs/{configId} {
-      allow read, write: if true;
-    }
-
-    match /configs/public/{docId} {
-      allow read, write: if true;
-    }
-
-    match /configs/secrets/{docId} {
-      allow read, write: if true;
-    }
-
-    // -------------------- RESTRICTED ADMINISTRATIVE COLLECTIONS --------------------
-    match /apiKeys/{docId} {
-      allow read, write: if true;
-    }
-
-    match /webhooks/{docId} {
-      allow read, write: if true;
-    }
-
-    match /backups/{docId} {
-      allow read, write: if true;
-    }
+  // Legacy certificates contain private identity data; public access must use projection below.
+  match /certificates/{id}{
+   allow get,list: if staff();
+   allow create: if staff();
+   // Existing client workflow needs migration to privileged approval API.
+   allow update: if reviewer();
+   allow delete: if admin();
   }
+  match /citizens/{id}{
+   allow get,list: if staff();
+   allow create,update: if staff();
+   allow delete: if admin();
+  }
+  match /configs/{id}{
+   allow get,list: if staff();
+   allow create,update,delete: if admin();
+  }
+  match /configs/{document=**}{
+   allow read,write: if false;
+  }
+  // Public QR tokens must be unpredictable. Only minimal non-PII projections are allowed.
+  // Publish and revoke through trusted Admin SDK only; client SDK has no write permission.
+  match /publicCertificateVerifications/{token}{
+   allow get: if true;
+   allow list,create,update,delete: if false;
+  }
+  match /apiKeys/{id}{
+   allow get,list,create,update,delete: if admin();
+  }
+  match /webhooks/{id}{
+   allow get,list,create,update,delete: if admin();
+  }
+  match /backups/{id}{
+   allow get,list,create,update,delete: if admin();
+  }
+  match /users/{id}{
+   allow get: if signedIn() && (request.auth.uid == id || admin());
+   allow list: if admin();
+   allow create,update,delete: if false;
+  }
+  match /admins/{id}{
+   allow get,list: if admin();
+   allow create,update,delete: if false;
+  }
+  match /auditLogs/{id}{
+   allow get,list: if admin();
+   allow create,update,delete: if false;
+  }
+ }
 }
-
-
