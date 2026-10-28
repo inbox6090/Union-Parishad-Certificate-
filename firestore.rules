@@ -57,7 +57,10 @@ service cloud.firestore {
      && (
        (request.resource.data.status == 'draft'
         && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
-        && request.resource.data.fieldValues == resource.data.fieldValues)
+        && request.resource.data.fieldValues is map
+        && request.resource.data.fieldValues.keys().hasOnly(['reason'])
+        && request.resource.data.fieldValues.reason is string
+        && request.resource.data.fieldValues.reason.size() <= 1500)
        ||
        (request.resource.data.status == 'submitted'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt','submittedAt'])
