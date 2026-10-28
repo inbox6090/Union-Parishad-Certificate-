@@ -52,51 +52,8 @@ interface HomePanelProps {
 
 const PIE_COLORS = ['#059669', '#0284c7', '#7c3aed', '#d97706', '#ec4899'];
 
-// Sample citizen dataset for instant smart search
-const SAMPLE_SEARCH_CITIZENS: CitizenAccountRecord[] = [
-  {
-    id: 'cit_1',
-    name: 'মোঃ আব্দুল কুদ্দুস',
-    father: 'মরহুম জলিল সরকার',
-    mother: 'মাজেদা খাতুন',
-    gender: 'পুরুষ',
-    nid: '19842692015000123',
-    mobile: '01711223344',
-    village: 'বহেড়াতৈল',
-    wardNo: '০৫',
-    postOffice: 'বহেড়াতৈল',
-    totalCertificates: 3,
-    registeredAt: '2026-01-15'
-  },
-  {
-    id: 'cit_2',
-    name: 'মোছাঃ ফাতেমা বেগম',
-    father: 'আবু বকর সিদ্দিক',
-    mother: 'রহিমা বেগম',
-    gender: 'মহিলা',
-    nid: '19922692015000456',
-    mobile: '01812345678',
-    village: 'গড়গোবিন্দপুর',
-    wardNo: '০২',
-    postOffice: 'বহেড়াতৈল',
-    totalCertificates: 2,
-    registeredAt: '2026-02-10'
-  },
-  {
-    id: 'cit_3',
-    name: 'মোঃ রফিকুল ইসলাম',
-    father: 'মোঃ শামসুল হক',
-    mother: 'আমেনা বেগম',
-    gender: 'পুরুষ',
-    nid: '5512345678',
-    mobile: '01911998877',
-    village: 'ডাবচেনি',
-    wardNo: '০৪',
-    postOffice: 'বহেড়াতৈল',
-    totalCertificates: 1,
-    registeredAt: '2026-03-01'
-  }
-];
+// Only records stored in the current application are searchable here.
+// Do not mix invented citizen identity records with operational data.
 
 export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,33 +75,21 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
     monthlyStats: Array<{ month: string; totalIssued: number; verified: number; pending: number }>;
     categoryDistribution: Array<{ name: string; value: number }>;
   }>({
-    totalCertificates: 1487,
-    todayCount: 9,
-    monthlyCount: 346,
-    pendingVerifications: 13,
-    verifiedCount: 1474,
-    birthCount: 482,
-    deathCount: 124,
-    warishCount: 295,
-    characterCount: 386,
-    totalRegisteredCitizens: 2150,
-    wardCounts: { '০১': 42, '০২': 35, '০৩': 28, '০৪': 50, '০৫': 65, '০৬': 38, '০৭': 29, '০৮': 31, '০৯': 40 },
-    monthlyStats: [
-      { month: 'মার্চ', totalIssued: 142, verified: 136, pending: 6 },
-      { month: 'এপ্রিল', totalIssued: 178, verified: 170, pending: 8 },
-      { month: 'মে', totalIssued: 215, verified: 205, pending: 10 },
-      { month: 'জুন', totalIssued: 260, verified: 248, pending: 12 },
-      { month: 'জুলাই', totalIssued: 310, verified: 298, pending: 12 },
-      { month: 'আগস্ট (চলতি)', totalIssued: 346, verified: 333, pending: 13 }
-    ],
-    categoryDistribution: [
-      { name: 'নাগরিকত্ব ও পরিচয়', value: 146 },
-      { name: 'উত্তরাধিকার ও পরিবার', value: 99 },
-      { name: 'চরিত্র ও সামাজিক', value: 65 },
-      { name: 'আর্থিক ও সম্পত্তি', value: 43 },
-      { name: 'অন্যান্য প্রত্যয়ন', value: 37 }
-    ]
+    totalCertificates: 0,
+    todayCount: 0,
+    monthlyCount: 0,
+    pendingVerifications: 0,
+    verifiedCount: 0,
+    birthCount: 0,
+    deathCount: 0,
+    warishCount: 0,
+    characterCount: 0,
+    totalRegisteredCitizens: 0,
+    wardCounts: {},
+    monthlyStats: [],
+    categoryDistribution: []
   });
+  const [statsStatus, setStatsStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
 
   // Real-time instant citizen search logic
   useEffect(() => {
@@ -166,7 +111,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
       console.warn('LocalStorage citizen parse warning:', e);
     }
 
-    const allCitizens = [...savedCitizens, ...SAMPLE_SEARCH_CITIZENS];
+    const allCitizens = savedCitizens;
     
     // De-duplicate by NID or ID
     const uniqueMap = new Map<string, CitizenAccountRecord>();
@@ -192,38 +137,46 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
         return res.json();
       })
       .then((data) => {
-        if (data && data.totalCertificates !== undefined) {
-          setStats((prev) => ({
-            ...prev,
-            totalCertificates: data.totalCertificates || 1487,
-            todayCount: data.todayCount || 9,
-            monthlyCount: data.monthlyCount || 346,
-            pendingVerifications: data.pendingVerifications || 13,
-            verifiedCount: data.verifiedCount || 1474,
-            wardCounts: data.wardCounts && Object.keys(data.wardCounts).length > 0
-              ? data.wardCounts
-              : prev.wardCounts
-          }));
-        }
+        if (!data || !Number.isFinite(data.totalCertificates)) throw new Error('Invalid statistics');
+        setStats((prev) => ({
+          ...prev,
+          totalCertificates: data.totalCertificates,
+          todayCount: Number.isFinite(data.todayCount) ? data.todayCount : 0,
+          monthlyCount: Number.isFinite(data.monthlyCount) ? data.monthlyCount : 0,
+          pendingVerifications: Number.isFinite(data.pendingVerifications) ? data.pendingVerifications : 0,
+          verifiedCount: Number.isFinite(data.verifiedCount) ? data.verifiedCount : 0,
+          birthCount: Number.isFinite(data.birthCount) ? data.birthCount : 0,
+          deathCount: Number.isFinite(data.deathCount) ? data.deathCount : 0,
+          warishCount: Number.isFinite(data.warishCount) ? data.warishCount : 0,
+          characterCount: Number.isFinite(data.characterCount) ? data.characterCount : 0,
+          totalRegisteredCitizens: Number.isFinite(data.totalRegisteredCitizens) ? data.totalRegisteredCitizens : 0,
+          wardCounts: data.wardCounts && typeof data.wardCounts === 'object' ? data.wardCounts : {},
+          monthlyStats: Array.isArray(data.monthlyStats) ? data.monthlyStats : [],
+          categoryDistribution: Array.isArray(data.categoryDistribution) ? data.categoryDistribution : []
+        }));
+        setStatsStatus('ready');
       })
-      .catch((e) => console.warn('Stats fetch notice (using cached/default stats):', e));
+      .catch((e) => {
+        console.warn('Statistics unavailable:', e);
+        setStatsStatus('unavailable');
+      });
   }, []);
 
   // Format ward data for horizontal bar chart
-  const wardChartData = [
-    { ward: 'ওয়ার্ড ০১', count: stats.wardCounts['০১'] || stats.wardCounts['1'] || 42 },
-    { ward: 'ওয়ার্ড ০২', count: stats.wardCounts['০২'] || stats.wardCounts['2'] || 35 },
-    { ward: 'ওয়ার্ড ০৩', count: stats.wardCounts['০৩'] || stats.wardCounts['3'] || 28 },
-    { ward: 'ওয়ার্ড ০৪', count: stats.wardCounts['০৪'] || stats.wardCounts['4'] || 50 },
-    { ward: 'ওয়ার্ড ০৫', count: stats.wardCounts['০৫'] || stats.wardCounts['5'] || 65 },
-    { ward: 'ওয়ার্ড ০৬', count: stats.wardCounts['০৬'] || stats.wardCounts['6'] || 38 },
-    { ward: 'ওয়ার্ড ০৭', count: stats.wardCounts['০৭'] || stats.wardCounts['7'] || 29 },
-    { ward: 'ওয়ার্ড ০৮', count: stats.wardCounts['০৮'] || stats.wardCounts['8'] || 31 },
-    { ward: 'ওয়ার্ড ০৯', count: stats.wardCounts['০৯'] || stats.wardCounts['9'] || 40 }
-  ];
+  const wardChartData = Array.from({ length: 9 }, (_, index) => {
+    const english = String(index + 1);
+    const bangla = english.replace(/\\d/g, (digit) => '০১২৩৪৫৬৭৮৯'[Number(digit)]);
+    return {
+      ward: `ওয়ার্ড ${bangla.padStart(2, '০')}`,
+      count: stats.wardCounts[bangla.padStart(2, '০')] ?? stats.wardCounts[english] ?? 0
+    };
+  });
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
+      <div role="status" aria-live="polite" className={`rounded-2xl border px-4 py-3 text-sm font-medium ${statsStatus === 'ready' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+        {statsStatus === 'loading' ? 'পরিসংখ্যান লোড হচ্ছে…' : statsStatus === 'ready' ? 'পরিসংখ্যান সার্ভারের তথ্য অনুযায়ী প্রদর্শিত হচ্ছে।' : 'পরিসংখ্যান পাওয়া যাচ্ছে না। নিচের শূন্য মানকে নিশ্চিত সংখ্যা হিসেবে বিবেচনা করবেন না।'}
+      </div>
       {/* Hero Banner */}
       <div className="relative bg-gradient-to-br from-emerald-900 via-emerald-950 to-teal-950 text-white rounded-3xl p-6 md:p-10 shadow-2xl border border-emerald-800/80 overflow-hidden">
         {/* Background Decorative Pattern */}
@@ -260,7 +213,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-sm rounded-xl shadow transition flex items-center gap-2 cursor-pointer"
             >
               <ShieldAlert className="w-5 h-5 text-slate-950" />
-              <span>চেয়ারম্যান অনুমোদন পোর্টাল</span>
+              <span>অনুমোদন পোর্টাল</span>
             </button>
 
             <button
@@ -302,13 +255,13 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-sm md:text-base flex items-center gap-2">
-                <span>স্মার্ট নাগরিক ও সনদ তথ্য লাইভ সার্চবার</span>
+                <span>সংরক্ষিত নাগরিক তথ্য অনুসন্ধান</span>
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">
-                  ১ সেকেন্ডে অনুসন্ধান
+                  এই ডিভাইসের রেকর্ড
                 </span>
               </h3>
               <p className="text-xs text-slate-500">
-                নাগরিকের নাম, জাতীয় পরিচয়পত্র (NID), জন্ম সনদ নম্বর, মোবাইল নম্বর বা গ্রাম লিখে তাত্ক্ষণিক তথ্য খুঁজুন:
+                এই ব্রাউজারে সংরক্ষিত নাগরিকের নাম, পরিচয় নম্বর, মোবাইল বা গ্রাম দিয়ে খুঁজুন। এটি কেন্দ্রীয় সার্ভার অনুসন্ধান নয়।
               </p>
             </div>
           </div>
@@ -330,8 +283,8 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="এখানে নাম (যেমন: আব্দুল কুদ্দুস), NID (১৭ ডিজিট), জন্ম সনদ নং বা মোবাইল নম্বর টাইপ করুন..."
-            className="w-full pl-11 pr-4 py-3 bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 focus:bg-white rounded-xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none transition shadow-inner"
+            placeholder="নাম, পরিচয় নম্বর অথবা মোবাইল দিয়ে অনুসন্ধান করুন"
+            aria-label="সংরক্ষিত নাগরিক অনুসন্ধান"\n            className="w-full pl-11 pr-4 py-3 bg-slate-50 border-2 border-slate-200 focus:border-emerald-600 focus:bg-white rounded-xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none transition shadow-inner"
           />
           <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3.5" />
         </div>
@@ -413,7 +366,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
             <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
             <span>নাগরিক সেবাসমূহ ও বিষয়ভিত্তিক রেজিস্টার কাউন্টার</span>
           </h3>
-          <span className="text-xs text-slate-500 font-semibold">লাইভ ডাটাবেজ সামারি</span>
+          <span className="text-xs text-slate-500 font-semibold">সার্ভার সংযুক্ত পরিসংখ্যান</span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -423,7 +376,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-emerald-200">জন্ম সনদ</span>
               <Baby className="w-4 h-4 text-amber-300" />
             </div>
-            <p className="text-xl font-black text-amber-300">{stats.birthCount} টি</p>
+            <p className="text-xl font-black text-amber-300">{statsStatus === 'ready' ? stats.birthCount : '—'} টি</p>
             <p className="text-[10px] text-emerald-300 font-medium">নিবন্ধনভুক্ত রেকর্ড</p>
           </div>
 
@@ -433,7 +386,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-slate-300">মৃত্যু নিবন্ধিত</span>
               <HeartPulse className="w-4 h-4 text-rose-400" />
             </div>
-            <p className="text-xl font-black text-rose-300">{stats.deathCount} টি</p>
+            <p className="text-xl font-black text-rose-300">{statsStatus === 'ready' ? stats.deathCount : '—'} টি</p>
             <p className="text-[10px] text-slate-400 font-medium">ইউনিয়ন রেজিস্টার</p>
           </div>
 
@@ -443,7 +396,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-amber-200">ওয়ারিশান সনদ</span>
               <Users className="w-4 h-4 text-amber-400" />
             </div>
-            <p className="text-xl font-black text-amber-300">{stats.warishCount} টি</p>
+            <p className="text-xl font-black text-amber-300">{statsStatus === 'ready' ? stats.warishCount : '—'} টি</p>
             <p className="text-[10px] text-amber-200 font-medium">উত্তরাধিকার তালিকা</p>
           </div>
 
@@ -453,7 +406,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-sky-200">চারিত্রিক ও পরিচয়</span>
               <UserCheck className="w-4 h-4 text-sky-300" />
             </div>
-            <p className="text-xl font-black text-sky-200">{stats.characterCount} টি</p>
+            <p className="text-xl font-black text-sky-200">{statsStatus === 'ready' ? stats.characterCount : '—'} টি</p>
             <p className="text-[10px] text-sky-300 font-medium">প্রত্যয়নপত্র জেনারেট</p>
           </div>
 
@@ -463,7 +416,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-purple-200">মোট নাগরিক</span>
               <Building2 className="w-4 h-4 text-purple-300" />
             </div>
-            <p className="text-xl font-black text-purple-200">{stats.totalRegisteredCitizens.toLocaleString()} জন</p>
+            <p className="text-xl font-black text-purple-200">{statsStatus === 'ready' ? stats.totalRegisteredCitizens.toLocaleString() : '—'} জন</p>
             <p className="text-[10px] text-purple-300 font-medium">মাস্টার সিটিজেন ডেটা</p>
           </div>
 
@@ -473,8 +426,8 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               <span className="text-[11px] font-bold text-teal-200">কিউআর ভেরিফাইড</span>
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-xl font-black text-emerald-300">{stats.verifiedCount.toLocaleString()} টি</p>
-            <p className="text-[10px] text-teal-300 font-medium">অনলাইন সত্যতা ৯৯.১%</p>
+            <p className="text-xl font-black text-emerald-300">{statsStatus === 'ready' ? stats.verifiedCount.toLocaleString() : '—'} টি</p>
+            <p className="text-[10px] text-teal-300 font-medium">সার্ভার-প্রদত্ত যাচাই সংখ্যা</p>
           </div>
         </div>
       </div>
@@ -485,10 +438,10 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
           <div>
             <p className="text-xs font-bold text-slate-500">মোট ইস্যুকৃত সনদ</p>
-            <p className="text-2xl font-black text-emerald-950 mt-1">{stats.totalCertificates.toLocaleString()} টি</p>
+            <p className="text-2xl font-black text-emerald-950 mt-1">{statsStatus === 'ready' ? stats.totalCertificates.toLocaleString() : '—'} টি</p>
             <p className="text-[10px] text-emerald-700 font-bold mt-1 flex items-center gap-1">
               <TrendingUp className="w-3 h-3 text-emerald-600" />
-              <span>গুগল ড্রাইভ ও রেজিস্টারে রক্ষিত</span>
+              <span>সার্ভার-প্রদত্ত মোট সংখ্যা</span>
             </p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 shadow-sm">
@@ -500,10 +453,10 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
           <div>
             <p className="text-xs font-bold text-slate-500">চলতি মাসের ব্যবহার (Monthly Usage)</p>
-            <p className="text-2xl font-black text-sky-950 mt-1">{stats.monthlyCount.toLocaleString()} টি</p>
+            <p className="text-2xl font-black text-sky-950 mt-1">{statsStatus === 'ready' ? stats.monthlyCount.toLocaleString() : '—'} টি</p>
             <p className="text-[10px] text-sky-700 font-bold mt-1 flex items-center gap-1">
               <Activity className="w-3 h-3 text-sky-600" />
-              <span>গত মাসের চেয়ে +১৪.২% বেশি</span>
+              <span>সার্ভার-প্রদত্ত মাসিক সংখ্যা</span>
             </p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-800 flex items-center justify-center shrink-0 shadow-sm">
@@ -515,7 +468,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
           <div>
             <p className="text-xs font-bold text-slate-500">সক্রিয় অপেক্ষমাণ যাচাই (Pending)</p>
-            <p className="text-2xl font-black text-amber-950 mt-1">{stats.pendingVerifications} টি</p>
+            <p className="text-2xl font-black text-amber-950 mt-1">{statsStatus === 'ready' ? stats.pendingVerifications : '—'} টি</p>
             <p className="text-[10px] text-amber-700 font-bold mt-1 flex items-center gap-1">
               <Clock className="w-3 h-3 text-amber-600" />
               <span>অনলাইন কিউআর যাচাই অপেক্ষমাণ</span>
@@ -530,10 +483,10 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition">
           <div>
             <p className="text-xs font-bold text-slate-500">সফল ডিজিটাল ভেরিফিকেশন</p>
-            <p className="text-2xl font-black text-purple-950 mt-1">{stats.verifiedCount.toLocaleString()} টি</p>
+            <p className="text-2xl font-black text-purple-950 mt-1">{statsStatus === 'ready' ? stats.verifiedCount.toLocaleString() : '—'} টি</p>
             <p className="text-[10px] text-purple-700 font-bold mt-1 flex items-center gap-1">
               <ShieldCheck className="w-3 h-3 text-purple-600" />
-              <span>৯৯.১% ডিজিটাল সিস্টেম নির্ভুলতা</span>
+              <span>সার্ভার-প্রদত্ত যাচাই সংখ্যা</span>
             </p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0 shadow-sm">
@@ -560,11 +513,11 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
               </p>
             </div>
             <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">
-              লাইভ আপডেট
+              সার্ভার ডাটা
             </span>
           </div>
 
-          <div className="h-72 w-full pt-2">
+          <div className="h-72 w-full pt-2">{stats.monthlyStats.length === 0 && <p className="text-sm text-slate-500 text-center py-20">মাসিক চার্টের জন্য পর্যাপ্ত তথ্য নেই।</p>}
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={stats.monthlyStats} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                 <defs>
@@ -620,7 +573,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
             </p>
           </div>
 
-          <div className="h-64 w-full flex items-center justify-center">
+          <div className="h-64 w-full flex items-center justify-center">{stats.categoryDistribution.length === 0 && <p className="text-sm text-slate-500 text-center">ক্যাটাগরি অনুযায়ী তথ্য নেই।</p>}
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -669,7 +622,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
           </span>
         </div>
 
-        <div className="h-56 w-full">
+        <div className="h-56 w-full">{Object.keys(stats.wardCounts).length === 0 && <p className="text-sm text-slate-500 text-center py-12">ওয়ার্ডভিত্তিক তথ্য নেই।</p>}
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={wardChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
