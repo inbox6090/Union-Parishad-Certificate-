@@ -165,7 +165,7 @@ export const HomePanel: React.FC<HomePanelProps> = ({ config, onNavigateTab }) =
   // Format ward data for horizontal bar chart
   const wardChartData = Array.from({ length: 9 }, (_, index) => {
     const english = String(index + 1);
-    const bangla = english.replace(/\\d/g, (digit) => '০১২৩৪৫৬৭৮৯'[Number(digit)]);
+    const bangla = english.replace(/\d/g, (digit) => '০১২৩৪৫৬৭৮৯'[Number(digit)]);
     return {
       ward: `ওয়ার্ড ${bangla.padStart(2, '০')}`,
       count: stats.wardCounts[bangla.padStart(2, '০')] ?? stats.wardCounts[english] ?? 0
