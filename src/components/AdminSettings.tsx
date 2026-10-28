@@ -1,0 +1,4783 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Settings, 
+  Save, 
+  Building2, 
+  User, 
+  Users,
+  Code, 
+  CheckCircle2, 
+  Loader2, 
+  Sparkles, 
+  Sliders, 
+  Cloud, 
+  Key, 
+  Database, 
+  Award, 
+  DollarSign, 
+  ShieldCheck, 
+  Check, 
+  Edit3,
+  HardDrive,
+  RefreshCw,
+  Download,
+  RotateCcw,
+  FileJson,
+  Upload,
+  AlertTriangle,
+  FolderArchive,
+  Wrench,
+  Activity,
+  Zap,
+  Server,
+  X,
+  Radio,
+  Trash2,
+  Copy,
+  ExternalLink,
+  Send,
+  Terminal,
+  FileText,
+  UserCog,
+  Eye,
+  ShieldAlert,
+  Search,
+  Filter,
+  ToggleLeft,
+  ToggleRight
+} from 'lucide-react';
+import { 
+  saveConfigToFirebase, 
+  batchRestoreCertificatesToFirebase, 
+  exportFirestoreCollectionsToStorage, 
+  fetchFirestoreBackupsFromFirebase,
+  restoreFullBackupToFirestore,
+  fetchAdminUsersFromFirebase,
+  saveAdminUserToFirebase,
+  deleteAdminUserFromFirebase,
+  addAuditLogToFirebase,
+  subscribeToAdminUsersFromFirebase,
+  saveRolePermissionsMatrixToFirebase,
+  subscribeToRolePermissionsMatrix,
+  AdminUserRecord,
+  FirestoreCollectionExportResult 
+} from '../firebase';
+import { UnionParishadConfig, BackupSnapshot, ApiKeyRecord, WebhookConfig, WebhookLogRecord, CouncilMember, CertificateRecord, AdminPermissions } from '../types';
+import { sanitizeInput, sanitizeObject } from '../utils/security';
+import { CERTIFICATE_TYPES } from '../data/certificateTypes';
+import { DEFAULT_COUNCIL_MEMBERS, getSyncedCouncilMembers } from '../data/councilMembers';
+import { AppsScriptModal } from './AppsScriptModal';
+import { TemplateManager } from './TemplateManager';
+import { BackupManager } from './BackupManager';
+import { PendingApprovals } from './PendingApprovals';
+import { GoogleSheetsSyncModal } from './GoogleSheetsSyncModal';
+import { FileSpreadsheet, QrCode } from 'lucide-react';
+import { StyledQrCode } from './StyledQrCode';
+import { QrColorScheme } from '../utils/qrCodeGenerator';
+
+interface AdminSettingsProps {
+  config: UnionParishadConfig;
+  onUpdateConfig: (newConfig: UnionParishadConfig) => void;
+}
+
+// Utility to convert uploaded image (JPG/PNG with white paper background) into transparent PNG signature
+const makeSignatureTransparent = (dataUrl: string): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(dataUrl);
+
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Make near-white paper background transparent & enhance dark ink contrast
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const brightness = (r + g + b) / 3;
+
+        if (brightness > 195) {
+          data[i + 3] = 0; // 100% transparent background
+        } else if (brightness > 150) {
+          const alphaFactor = (195 - brightness) / 45;
+          data[i + 3] = Math.round(data[i + 3] * alphaFactor);
+        } else {
+          // Darken ink contrast
+          data[i] = Math.max(0, r - 40);
+          data[i + 1] = Math.max(0, g - 40);
+          data[i + 2] = Math.max(0, b - 40);
+          data[i + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+};
+
+export const AdminSettings: React.FC<AdminSettingsProps> = ({ config, onUpdateConfig }) => {
+  const [formData, setFormData] = useState<UnionParishadConfig>({ ...config });
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isAppsScriptOpen, setIsAppsScriptOpen] = useState(false);
+  const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+  const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
+  const [isSheetsSyncOpen, setIsSheetsSyncOpen] = useState(false);
+  const [certsForSync, setCertsForSync] = useState<CertificateRecord[]>([]);
+
+  useEffect(() => {
+    if (isSheetsSyncOpen) {
+      fetch('/api/admin/logs')
+        .then(res => res.json())
+        .then(data => {
+          if (data.logs) setCertsForSync(data.logs);
+        })
+        .catch(err => console.warn('Error fetching logs for sync:', err));
+    }
+  }, [isSheetsSyncOpen]);
+  const [activeTab, setActiveTab] = useState<'pending' | 'general' | 'print' | 'workspace' | 'r2' | 'ai' | 'types' | 'backup' | 'maintenance' | 'api_webhook' | 'multi_admin' | 'council_members' | 'role_management'>('pending');
+  
+  // Multi-Admin Management State
+  const [adminsDirectory, setAdminsDirectory] = useState<AdminUserRecord[]>([]);
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminDesignation, setNewAdminDesignation] = useState('ইউপি সদস্য / অফিসার');
+  const [newAdminRole, setNewAdminRole] = useState<'super_admin' | 'chairman' | 'secretary' | 'member' | 'developer'>('member');
+  const [isSavingAdminUser, setIsSavingAdminUser] = useState(false);
+
+  // Role & Permissions Management Matrix State
+  const [roleMatrix, setRoleMatrix] = useState<Record<string, AdminPermissions>>({
+    chairman: {
+      canView: true,
+      canEdit: true,
+      canApprove: true,
+      canDelete: false,
+      canApproveCertificates: true,
+      canIssueCertificates: true,
+      canManageAdmins: true,
+      canEditConfig: true,
+      canExportData: true,
+      canDeleteLogs: false,
+    },
+    secretary: {
+      canView: true,
+      canEdit: true,
+      canApprove: false,
+      canDelete: false,
+      canApproveCertificates: false,
+      canIssueCertificates: true,
+      canManageAdmins: false,
+      canEditConfig: false,
+      canExportData: true,
+      canDeleteLogs: false,
+    },
+    member: {
+      canView: true,
+      canEdit: false,
+      canApprove: false,
+      canDelete: false,
+      canApproveCertificates: false,
+      canIssueCertificates: true,
+      canManageAdmins: false,
+      canEditConfig: false,
+      canExportData: false,
+      canDeleteLogs: false,
+    },
+    super_admin: {
+      canView: true,
+      canEdit: true,
+      canApprove: true,
+      canDelete: true,
+      canApproveCertificates: true,
+      canIssueCertificates: true,
+      canManageAdmins: true,
+      canEditConfig: true,
+      canExportData: true,
+      canDeleteLogs: true,
+    },
+    developer: {
+      canView: true,
+      canEdit: true,
+      canApprove: true,
+      canDelete: true,
+      canApproveCertificates: true,
+      canIssueCertificates: true,
+      canManageAdmins: true,
+      canEditConfig: true,
+      canExportData: true,
+      canDeleteLogs: true,
+    },
+  });
+
+  const [roleSearchFilter, setRoleSearchFilter] = useState('');
+  const [roleFilterRole, setRoleFilterRole] = useState<string>('all');
+  const [roleStatusToast, setRoleStatusToast] = useState<string | null>(null);
+
+  // Real-time synchronization for admin directory and role permissions matrix
+  useEffect(() => {
+    const unsubscribeAdmins = subscribeToAdminUsersFromFirebase((admins) => {
+      setAdminsDirectory(admins);
+    });
+
+    const unsubscribeMatrix = subscribeToRolePermissionsMatrix((remoteMatrix) => {
+      if (remoteMatrix) {
+        setRoleMatrix((prev) => ({ ...prev, ...remoteMatrix }));
+      }
+    });
+
+    return () => {
+      unsubscribeAdmins();
+      unsubscribeMatrix();
+    };
+  }, []);
+
+  const handleToggleRolePermission = async (roleKey: string, permKey: keyof AdminPermissions) => {
+    const currentVal = !!roleMatrix[roleKey]?.[permKey];
+    const newVal = !currentVal;
+
+    const updatedRolePerms: AdminPermissions = {
+      ...(roleMatrix[roleKey] || {
+        canApproveCertificates: false,
+        canIssueCertificates: true,
+        canManageAdmins: false,
+        canEditConfig: false,
+        canExportData: false,
+        canDeleteLogs: false,
+      }),
+      [permKey]: newVal,
+    };
+
+    if (permKey === 'canView') updatedRolePerms.canIssueCertificates = newVal;
+    if (permKey === 'canEdit') updatedRolePerms.canEditConfig = newVal;
+    if (permKey === 'canApprove') updatedRolePerms.canApproveCertificates = newVal;
+    if (permKey === 'canDelete') updatedRolePerms.canDeleteLogs = newVal;
+
+    const newMatrix = {
+      ...roleMatrix,
+      [roleKey]: updatedRolePerms,
+    };
+
+    setRoleMatrix(newMatrix);
+
+    try {
+      await saveRolePermissionsMatrixToFirebase(newMatrix);
+
+      const usersToUpdate = adminsDirectory.filter((u) => u.role === roleKey);
+      for (const u of usersToUpdate) {
+        await saveAdminUserToFirebase({
+          ...u,
+          permissions: updatedRolePerms,
+        });
+      }
+
+      const roleLabels: Record<string, string> = {
+        chairman: 'চেয়ারম্যান',
+        secretary: 'সচিব',
+        member: 'ইউপি সদস্য',
+        super_admin: 'সুপার এডমিন',
+        developer: 'আইটি ডেভেলপার',
+      };
+
+      const permLabels: Record<string, string> = {
+        canView: 'ভিউ (View)',
+        canEdit: 'এডিট (Edit)',
+        canApprove: 'অনুমোদন (Approve)',
+        canDelete: 'ডিলিট (Delete)',
+        canManageAdmins: 'এডমিন কন্ট্রোল',
+        canExportData: 'ডাটা এক্সপোর্ট',
+      };
+
+      const pk = String(permKey);
+      setRoleStatusToast(
+        `✓ ${roleLabels[roleKey] || roleKey}-এর "${permLabels[pk] || pk}" পারমিশন ফায়ারবেসে রিয়েল-টাইমে সিঙ্ক করা হইয়াছে!`
+      );
+      setTimeout(() => setRoleStatusToast(null), 4000);
+    } catch (err) {
+      console.error('Error updating role permissions in Firebase:', err);
+      setRoleStatusToast('⚠️ পারমিশন ফায়ারবেসে সিঙ্ক করিতে ত্রুটি হইয়াছে।');
+      setTimeout(() => setRoleStatusToast(null), 4000);
+    }
+  };
+
+  const handleToggleUserPermission = async (email: string, permKey: keyof AdminPermissions) => {
+    const userIndex = adminsDirectory.findIndex((u) => u.email === email);
+    if (userIndex === -1) return;
+
+    const user = adminsDirectory[userIndex];
+    const currentPerms = user.permissions || roleMatrix[user.role] || {
+      canApproveCertificates: false,
+      canIssueCertificates: true,
+      canManageAdmins: false,
+      canEditConfig: false,
+      canExportData: false,
+      canDeleteLogs: false,
+    };
+
+    const currentVal = !!currentPerms[permKey];
+    const newVal = !currentVal;
+
+    const updatedUserPerms: AdminPermissions = {
+      ...currentPerms,
+      [permKey]: newVal,
+    };
+
+    if (permKey === 'canView') updatedUserPerms.canIssueCertificates = newVal;
+    if (permKey === 'canEdit') updatedUserPerms.canEditConfig = newVal;
+    if (permKey === 'canApprove') updatedUserPerms.canApproveCertificates = newVal;
+    if (permKey === 'canDelete') updatedUserPerms.canDeleteLogs = newVal;
+
+    const updatedUser: AdminUserRecord = {
+      ...user,
+      permissions: updatedUserPerms,
+    };
+
+    try {
+      await saveAdminUserToFirebase(updatedUser);
+      setRoleStatusToast(`✓ ${user.name}-এর পারমিশন ফায়ারবেস মেটাডাটা রিয়েল-টাইমে আপডেট হইয়াছে!`);
+      setTimeout(() => setRoleStatusToast(null), 4000);
+    } catch (err) {
+      console.error('Error saving user permissions:', err);
+      setRoleStatusToast('⚠️ ফায়ারবেস মেটাডাটা আপডেটে ত্রুটি।');
+      setTimeout(() => setRoleStatusToast(null), 4000);
+    }
+  };
+
+  const handleResetUserToRoleDefaults = async (user: AdminUserRecord) => {
+    const defaultPerms = roleMatrix[user.role] || {
+      canApproveCertificates: false,
+      canIssueCertificates: true,
+      canManageAdmins: false,
+      canEditConfig: false,
+      canExportData: false,
+      canDeleteLogs: false,
+    };
+
+    const updatedUser: AdminUserRecord = {
+      ...user,
+      permissions: defaultPerms,
+    };
+
+    try {
+      await saveAdminUserToFirebase(updatedUser);
+      setRoleStatusToast(`✓ ${user.name}-এর পারমিশন ডিফল্ট রোলে রিস্টোর হইয়াছে!`);
+      setTimeout(() => setRoleStatusToast(null), 4000);
+    } catch (err) {
+      console.error('Error resetting user permissions:', err);
+    }
+  };
+  // API Key & Webhook Integration State
+  const [apiKeysList, setApiKeysList] = useState<ApiKeyRecord[]>([]);
+  const [webhooksList, setWebhooksList] = useState<WebhookConfig[]>([]);
+  const [webhookLogsList, setWebhookLogsList] = useState<WebhookLogRecord[]>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyPerm, setNewKeyPerm] = useState<'read' | 'write' | 'admin'>('read');
+  const [isGeneratingKey, setIsGeneratingKey] = useState(false);
+
+  const [newWebhookName, setNewWebhookName] = useState('');
+  const [newWebhookUrl, setNewWebhookUrl] = useState('');
+  const [newWebhookSecret, setNewWebhookSecret] = useState('');
+  const [newWebhookEvents, setNewWebhookEvents] = useState<('certificate.created' | 'certificate.approved' | 'certificate.cancelled' | 'citizen.registered')[]>([
+    'certificate.created',
+    'certificate.approved',
+    'certificate.cancelled'
+  ]);
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookTestFeedback, setWebhookTestFeedback] = useState<string | null>(null);
+  const [selectedCodeTab, setSelectedCodeTab] = useState<'curl' | 'fetch' | 'gas' | 'python'>('curl');
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+
+  // Backup & Restore Utility State
+  const [backupsList, setBackupsList] = useState<BackupSnapshot[]>([]);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [backupNotes, setBackupNotes] = useState('');
+  const [backupMessage, setBackupMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [archiveFolderInput, setArchiveFolderInput] = useState(formData.archiveFolderId || formData.targetFolderId || '');
+
+  // Project Clone & Deployment Wizard State
+  const [isExportingClone, setIsExportingClone] = useState(false);
+  const [showCloneWizard, setShowCloneWizard] = useState(false);
+  const [clonePackageData, setClonePackageData] = useState<any>(null);
+  const [cloneMode, setCloneMode] = useState<'NEW_UNION_CLONE' | 'EXACT_RESTORE'>('NEW_UNION_CLONE');
+  const [cloneUnionName, setCloneUnionName] = useState('');
+  const [cloneUpazila, setCloneUpazila] = useState('');
+  const [cloneDistrict, setCloneDistrict] = useState('');
+  const [cloneChairman, setCloneChairman] = useState('');
+  const [cloneSheetId, setCloneSheetId] = useState('');
+  const [cloneFolderId, setCloneFolderId] = useState('');
+  const [isImportingClone, setIsImportingClone] = useState(false);
+
+  // Firestore Batch Write Import & Restore State
+  const [firestoreImportFile, setFirestoreImportFile] = useState<File | null>(null);
+  const [firestoreImportCerts, setFirestoreImportCerts] = useState<any[]>([]);
+  const [isBatchRestoringFirestore, setIsBatchRestoringFirestore] = useState(false);
+  const [firestoreBatchResult, setFirestoreBatchResult] = useState<{ count: number; batches: number } | null>(null);
+
+  // Developer Firestore Collection Export State
+  const [developerSelectedCollections, setDeveloperSelectedCollections] = useState<string[]>([
+    'certificates',
+    'configs',
+    'apiKeys',
+    'webhooks',
+    'backups'
+  ]);
+  const [developerExportNotes, setDeveloperExportNotes] = useState('ডেভেলপার রোল: ফায়ারস্টোর কালেকশন ব্যাকআপ এক্সপোর্ট');
+  const [isExportingFirestoreDev, setIsExportingFirestoreDev] = useState(false);
+  const [firestoreDevExportResult, setFirestoreDevExportResult] = useState<FirestoreCollectionExportResult | null>(null);
+  const [devExportProgress, setDevExportProgress] = useState<{
+    stage: string;
+    percent: number;
+    currentCol?: string;
+  } | null>(null);
+
+  const handleToggleDevCollection = (colName: string) => {
+    setDeveloperSelectedCollections(prev => 
+      prev.includes(colName) ? prev.filter(c => c !== colName) : [...prev, colName]
+    );
+  };
+
+  const handleExecuteDeveloperFirestoreExport = async () => {
+    if (developerSelectedCollections.length === 0) {
+      alert('অনুগ্রহ করে অন্তত একটি ফায়ারস্টোর কালেকশন নির্বাচন করুন।');
+      return;
+    }
+    setIsExportingFirestoreDev(true);
+    setFirestoreDevExportResult(null);
+    setDevExportProgress({ stage: 'প্রক্রিয়া শুরু হচ্ছে...', percent: 5 });
+
+    try {
+      const result = await exportFirestoreCollectionsToStorage(
+        developerSelectedCollections,
+        developerExportNotes,
+        (progress) => {
+          setDevExportProgress(progress);
+        }
+      );
+      setFirestoreDevExportResult(result);
+      fetchBackupsList();
+    } catch (err: any) {
+      alert('ফায়ারস্টোর এক্সপোর্ট এক্সিকিউশনে ত্রুটি: ' + (err.message || String(err)));
+      setDevExportProgress(null);
+    } finally {
+      setIsExportingFirestoreDev(false);
+    }
+  };
+
+  const handleDownloadDevExportJson = () => {
+    if (!firestoreDevExportResult) return;
+    const jsonString = JSON.stringify(firestoreDevExportResult.jsonData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = firestoreDevExportResult.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // System Maintenance State
+  const [maintHealth, setMaintHealth] = useState<any>(null);
+  const [isTriggeringMaintSnapshot, setIsTriggeringMaintSnapshot] = useState(false);
+  const [designatedBackupFolder, setDesignatedBackupFolder] = useState(formData.archiveFolderId || formData.targetFolderId || '');
+  const [maintNotes, setMaintNotes] = useState('');
+  const [maintMessage, setMaintMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Fetch Maintenance Status
+  const fetchMaintenanceStatus = async () => {
+    try {
+      const res = await fetch('/api/admin/maintenance/status');
+      const data = await res.json();
+      if (data.success && data.systemHealth) {
+        setMaintHealth(data.systemHealth);
+        if (data.systemHealth.designatedBackupFolderId) {
+          setDesignatedBackupFolder(data.systemHealth.designatedBackupFolderId);
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching maintenance status:', err);
+    }
+  };
+
+  const fetchApiAndWebhookData = async () => {
+    try {
+      const [resKeys, resHooks] = await Promise.all([
+        fetch('/api/admin/api-keys'),
+        fetch('/api/admin/webhooks')
+      ]);
+      const dataKeys = await resKeys.json();
+      const dataHooks = await resHooks.json();
+
+      if (dataKeys.success) setApiKeysList(dataKeys.apiKeys || []);
+      if (dataHooks.success) {
+        setWebhooksList(dataHooks.webhooks || []);
+        setWebhookLogsList(dataHooks.logs || []);
+      }
+    } catch (err) {
+      console.warn('Error fetching API/Webhook data:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'maintenance') {
+      fetchMaintenanceStatus();
+      fetchBackupsList();
+    } else if (activeTab === 'api_webhook') {
+      fetchApiAndWebhookData();
+    } else if (activeTab === 'multi_admin') {
+      fetchAdminUsersFromFirebase().then(setAdminsDirectory).catch(console.warn);
+    }
+  }, [activeTab]);
+
+  const handleAddAdminUser = async () => {
+    if (!newAdminEmail.trim() || !newAdminEmail.includes('@')) {
+      alert('অনুগ্রহ করে একটি বৈধ ইমেইল প্রদান করুন।');
+      return;
+    }
+    if (!newAdminName.trim()) {
+      alert('অনুগ্রহ করে এডমিন ইউজারের নাম লিখুন।');
+      return;
+    }
+    setIsSavingAdminUser(true);
+    try {
+      const record: AdminUserRecord = {
+        email: newAdminEmail.trim().toLowerCase(),
+        name: newAdminName.trim(),
+        designation: newAdminDesignation.trim(),
+        role: newAdminRole,
+        addedAt: new Date().toISOString(),
+        status: 'active'
+      };
+      await saveAdminUserToFirebase(record);
+      const updated = await fetchAdminUsersFromFirebase();
+      setAdminsDirectory(updated);
+      setNewAdminEmail('');
+      setNewAdminName('');
+      alert('নতুন এডমিন ইউজার সফলভাবে ফায়ারবেস ডাটাবেসে যুক্ত করা হইয়াছে!');
+    } catch (err: any) {
+      alert('এডমিন যুক্ত করতে ব্যর্থ: ' + err.message);
+    } finally {
+      setIsSavingAdminUser(false);
+    }
+  };
+
+  const handleDeleteAdminUser = async (email: string) => {
+    if (!window.confirm(`আপনি কি নিশ্চিত যে '${email}' এডমিন অনুমতি বাতিল করতে চান?`)) return;
+    try {
+      await deleteAdminUserFromFirebase(email);
+      await addAuditLogToFirebase({
+        action: 'ADMIN_REMOVED',
+        actionTitle: 'এডমিন অ্যাকসেস অ্যাকাউন্ট বাতিল',
+        details: `ফায়ারবেস ডিরেক্টরি হইতে ইউজার '${email}' এর এডমিন অ্যাকসেস অপসারণ করা হইয়াছে।`,
+        performedByEmail: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).email : 'baheratailunion@gmail.com',
+        performedByName: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).name : 'সুপার এডমিন',
+        performedByRole: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).role : 'super_admin'
+      });
+      const updated = await fetchAdminUsersFromFirebase();
+      setAdminsDirectory(updated);
+    } catch (err: any) {
+      alert('এডমিন বাতিল ব্যর্থ: ' + err.message);
+    }
+  };
+
+  const handleGenerateApiKey = async () => {
+    const cleanName = sanitizeInput(newKeyName.trim(), 200);
+    if (!cleanName) {
+      alert('অনুগ্রহ করে API Key-এর একটি নাম বা সার্ভিস বর্ণনা প্রদান করুন (যেমন: ব্যাংক যাচাইকরণ সার্ভিস)।');
+      return;
+    }
+    setIsGeneratingKey(true);
+    try {
+      const res = await fetch('/api/admin/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cleanName, permissions: newKeyPerm })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewKeyName('');
+        fetchApiAndWebhookData();
+        alert('নতুন API Access Key সফলভাবে জেনারেট করা হইয়াছে!');
+      } else {
+        alert('API Key জেনারেট ব্যর্থ: ' + data.message);
+      }
+    } catch (err: any) {
+      alert('ত্রুটি: ' + err.message);
+    } finally {
+      setIsGeneratingKey(false);
+    }
+  };
+
+  const handleRevokeApiKey = async (id: string) => {
+    if (!window.confirm('আপনি কি নিশ্চিত যে এই API Key-টি বাতিল (Revoke) করতে চান? এটি ব্যবহারকারী অন্যান্য সার্ভিস বিচ্ছিন্ন হইবে।')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/api-keys/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        fetchApiAndWebhookData();
+      } else {
+        alert(data.message);
+      }
+    } catch (err: any) {
+      alert('ত্রুটি: ' + err.message);
+    }
+  };
+
+  const handleAddWebhook = async () => {
+    const cleanUrl = newWebhookUrl.trim();
+    if (!cleanUrl || !cleanUrl.startsWith('http')) {
+      alert('অনুগ্রহ করে একটি বৈধ Webhook URL প্রদান করুন (http:// বা https://)।');
+      return;
+    }
+    const cleanName = sanitizeInput(newWebhookName.trim() || 'নতুন ওয়েবহুক এন্ডপয়েন্ট', 200);
+    const cleanSecret = sanitizeInput(newWebhookSecret.trim(), 200);
+
+    setIsSavingWebhook(true);
+    try {
+      const res = await fetch('/api/admin/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: cleanName,
+          url: cleanUrl,
+          secret: cleanSecret,
+          events: newWebhookEvents,
+          enabled: true
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewWebhookName('');
+        setNewWebhookUrl('');
+        setNewWebhookSecret('');
+        fetchApiAndWebhookData();
+        alert('নতুন Webhook এন্ডপয়েন্ট সফলভাবে কনফিগার করা হইয়াছে!');
+      } else {
+        alert('Webhook কনফিগারেশন ব্যর্থ: ' + data.message);
+      }
+    } catch (err: any) {
+      alert('ত্রুটি: ' + err.message);
+    } finally {
+      setIsSavingWebhook(false);
+    }
+  };
+
+  const handleDeleteWebhook = async (id: string) => {
+    if (!window.confirm('আপনি কি নিশ্চিত যে এই Webhook এন্ডপয়েন্টটি মুছে ফেলতে চান?')) return;
+    try {
+      const res = await fetch(`/api/admin/webhooks/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        fetchApiAndWebhookData();
+      }
+    } catch (err: any) {
+      alert('ত্রুটি: ' + err.message);
+    }
+  };
+
+  const handleTestWebhookPing = async (webhookId?: string, urlOverride?: string, secretOverride?: string) => {
+    setIsTestingWebhook(true);
+    setWebhookTestFeedback(null);
+    try {
+      const res = await fetch('/api/admin/webhooks/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhookId, url: urlOverride || newWebhookUrl, secret: secretOverride || newWebhookSecret })
+      });
+      const data = await res.json();
+      setWebhookTestFeedback(data.message || (data.success ? 'টেস্ট পিং সফল!' : 'টেস্ট পিং ব্যর্থ'));
+      fetchApiAndWebhookData();
+    } catch (err: any) {
+      setWebhookTestFeedback('টেস্ট পিং পাঠাতে ব্যর্থ: ' + err.message);
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  const handleTriggerManualSheetSnapshot = async () => {
+    setIsTriggeringMaintSnapshot(true);
+    setMaintMessage(null);
+    try {
+      const res = await fetch('/api/admin/maintenance/snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          backupFolderId: designatedBackupFolder || formData.targetFolderId,
+          notes: maintNotes || 'সিস্টেম মেইনটেন্যান্স: ম্যানুয়াল প্রাইমারি শিট স্ন্যাপশট'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMaintMessage({
+          text: data.message || 'প্রাইমারি গুগল শিট ডাটাবেসের ম্যানুয়াল স্ন্যাপশট সফলভাবে সম্পন্ন হইয়াছে!',
+          type: 'success'
+        });
+        setMaintNotes('');
+        fetchMaintenanceStatus();
+        fetchBackupsList();
+        if (data.snapshot) {
+          setFormData(prev => ({
+            ...prev,
+            lastBackupDate: data.snapshot.timestamp,
+            archiveFolderId: designatedBackupFolder
+          }));
+        }
+      } else {
+        setMaintMessage({
+          text: data.message || 'ম্যানুয়াল স্ন্যাপশট গ্রহণ করা সম্ভব হয় নাই।',
+          type: 'error'
+        });
+      }
+    } catch (err: any) {
+      setMaintMessage({ text: 'স্ন্যাপশট ত্রুটি: ' + err.message, type: 'error' });
+    } finally {
+      setIsTriggeringMaintSnapshot(false);
+    }
+  };
+
+  const handleClearSystemCache = async () => {
+    try {
+      const res = await fetch('/api/admin/maintenance/clear-cache', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setMaintMessage({ text: data.message, type: 'success' });
+        fetchMaintenanceStatus();
+      }
+    } catch (err: any) {
+      setMaintMessage({ text: 'ক্যাশ ক্লিয়ার ত্রুটি: ' + err.message, type: 'error' });
+    }
+  };
+
+  // State for Backup List Search & Active Restore
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+  const [backupSearchTerm, setBackupSearchTerm] = useState('');
+
+  // Fetch Unified Backups (Firebase Cloud Storage + Server Snapshots)
+  const fetchBackupsList = async () => {
+    try {
+      const [serverRes, firestoreBackups] = await Promise.all([
+        fetch('/api/admin/backups').then(r => r.json()).catch(() => ({ success: false, backups: [] })),
+        fetchFirestoreBackupsFromFirebase().catch(() => [])
+      ]);
+
+      const combined: any[] = [];
+      const seenKeys = new Set<string>();
+
+      // First add Firestore / Firebase Storage backups
+      if (Array.isArray(firestoreBackups)) {
+        for (const fb of firestoreBackups) {
+          const key = fb.id || fb.filename;
+          seenKeys.add(key);
+          if (fb.filename) seenKeys.add(fb.filename);
+          combined.push(fb);
+        }
+      }
+
+      // Add Server Snapshots if not already present
+      if (serverRes.success && Array.isArray(serverRes.backups)) {
+        for (const sb of serverRes.backups) {
+          if (!seenKeys.has(sb.id) && !seenKeys.has(sb.filename)) {
+            seenKeys.add(sb.id);
+            if (sb.filename) seenKeys.add(sb.filename);
+            combined.push({
+              ...sb,
+              source: 'server_snapshot'
+            });
+          }
+        }
+      }
+
+      // Sort by timestamp descending
+      combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setBackupsList(combined);
+    } catch (err) {
+      console.warn('Error fetching backups list:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'backup') {
+      fetchBackupsList();
+    }
+  }, [activeTab]);
+
+  const handleTriggerBackup = async () => {
+    setIsBackingUp(true);
+    setBackupMessage(null);
+    try {
+      const res = await fetch('/api/admin/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          archiveFolderId: archiveFolderInput || formData.targetFolderId,
+          notes: backupNotes || 'গুগল ড্রাইভ ও প্রাইমারি ডাটাবেস স্ন্যাপশট'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBackupMessage({ text: data.message || 'ব্যাকআপ স্ন্যাপশট সফলভাবে সংরক্ষিত হইয়াছে!', type: 'success' });
+        setBackupNotes('');
+        fetchBackupsList();
+        if (data.lastBackupDate) {
+          setFormData(prev => ({ ...prev, lastBackupDate: data.lastBackupDate, archiveFolderId: archiveFolderInput }));
+        }
+      } else {
+        setBackupMessage({ text: data.message || 'ব্যাকআপ সম্পন্ন করা সম্ভব হয় নাই।', type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMessage({ text: 'ব্যাকআপ ত্রুটি: ' + err.message, type: 'error' });
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleRestoreBackup = async (backupItemOrId?: any, customJson?: any) => {
+    let backupItem: any = null;
+    if (typeof backupItemOrId === 'string') {
+      backupItem = backupsList.find(b => b.id === backupItemOrId) || { id: backupItemOrId, backupData: customJson };
+    } else if (backupItemOrId && typeof backupItemOrId === 'object') {
+      backupItem = backupItemOrId;
+    }
+
+    const filename = backupItem?.filename || 'Database Snapshot';
+    if (!window.confirm(`আপনি কি নিশ্চিত যে '${filename}' ব্যাকআপ ডাটাবেসে রিস্টোর করতে চান? বর্তমান ডাটাবেস আপডেট হইবে।`)) {
+      return;
+    }
+
+    const bkpId = backupItem?.id || `rest_${Date.now()}`;
+    setRestoringBackupId(bkpId);
+    setIsRestoring(true);
+    setBackupMessage(null);
+
+    try {
+      let payload = customJson || backupItem?.backupData;
+
+      // If payload is missing but downloadUrl exists (from Firebase Cloud Storage), fetch the JSON file content
+      if (!payload && backupItem?.downloadUrl) {
+        try {
+          const res = await fetch(backupItem.downloadUrl);
+          payload = await res.json();
+        } catch (fetchErr) {
+          console.warn('Error downloading backup JSON from Firebase Cloud Storage URL:', fetchErr);
+        }
+      }
+
+      // 1. Restore to Firestore collections via batch write
+      let fsMsg = '';
+      if (payload) {
+        try {
+          const fsRes = await restoreFullBackupToFirestore(payload);
+          const colList = fsRes.collectionsRestored.length > 0 ? ` [কালেকশন: ${fsRes.collectionsRestored.join(', ')}]` : '';
+          fsMsg = ` (Firestore-এ ${fsRes.totalRestored} টি রেকর্ড রিস্টোর করা হয়েছে${colList})`;
+        } catch (fsErr: any) {
+          console.warn('Firestore restore warning:', fsErr);
+        }
+      }
+
+      // 2. Sync with Express backend server
+      const res = await fetch('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupId: bkpId, backupData: payload })
+      });
+      const data = await res.json();
+
+      if (data.success || fsMsg) {
+        setBackupMessage({
+          text: (data.message || 'ডাটাবেস সফলভাবে রিস্টোর করা হইয়াছে!') + fsMsg,
+          type: 'success'
+        });
+      } else {
+        setBackupMessage({ text: data.message || 'রিস্টোর সম্পন্ন করা সম্ভব হয় নাই।', type: 'error' });
+      }
+    } catch (err: any) {
+      console.error('Restore execution error:', err);
+      setBackupMessage({ text: 'রিস্টোর প্রসেস ত্রুটি: ' + (err.message || String(err)), type: 'error' });
+    } finally {
+      setIsRestoring(false);
+      setRestoringBackupId(null);
+    }
+  };
+
+  const handleDownloadBackupFile = async (bkp: any) => {
+    try {
+      // Direct Firebase Cloud Storage download URL
+      if (bkp.downloadUrl) {
+        const a = document.createElement('a');
+        a.href = bkp.downloadUrl;
+        a.download = bkp.filename || 'Firestore_Backup.json';
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      // Local or inline backup JSON data
+      if (bkp.backupData) {
+        const jsonStr = JSON.stringify(bkp.backupData, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = bkp.filename || 'Database_Backup.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      // Fallback: request from server
+      window.open('/api/admin/project-clone/export', '_blank');
+    } catch (err: any) {
+      alert('ডাউনলোড ত্রুটি: ' + err.message);
+    }
+  };
+
+  const handleExportProjectClonePackage = () => {
+    setIsExportingClone(true);
+    try {
+      window.open('/api/admin/project-clone/export', '_blank');
+      setBackupMessage({
+        text: 'সম্পূর্ণ প্রজেক্ট ক্লোন প্যাকেজ ফাইল (UP_Full_Project_Backup.json) সফলভাবে ডাউনলোড হইতেছে!',
+        type: 'success'
+      });
+    } catch (err: any) {
+      setBackupMessage({ text: 'প্রজেক্ট প্যাকেজ এক্সপোর্ট ত্রুটি: ' + err.message, type: 'error' });
+    } finally {
+      setIsExportingClone(false);
+    }
+  };
+
+  const handleClonePackageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json && typeof json === 'object') {
+          setClonePackageData(json);
+          const cfg = json.unionConfig || json.config || {};
+          setCloneUnionName(cfg.upName || formData.upName || '');
+          setCloneUpazila(cfg.upazila || formData.upazila || '');
+          setCloneDistrict(cfg.district || formData.district || '');
+          setCloneChairman(cfg.chairmanName || formData.chairmanName || '');
+          setCloneSheetId(cfg.sheetId || formData.sheetId || '');
+          setCloneFolderId(cfg.targetFolderId || formData.targetFolderId || '');
+          setShowCloneWizard(true);
+        } else {
+          alert('অবৈধ প্রজেক্ট প্যাকেজ ফাইল।');
+        }
+      } catch (err) {
+        alert('ফাইল পড়া ব্যর্থ হইয়াছে বা এটি একটি অবৈধ JSON ফাইল।');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExecuteCloneImport = async () => {
+    if (!clonePackageData) return;
+    setIsImportingClone(true);
+    setBackupMessage(null);
+
+    try {
+      const res = await fetch('/api/admin/project-clone/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageData: clonePackageData,
+          cloneMode,
+          newUnionName: cloneUnionName,
+          newUpazila: cloneUpazila,
+          newDistrict: cloneDistrict,
+          newChairman: cloneChairman,
+          newSheetId: cloneSheetId,
+          newFolderId: cloneFolderId
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        // Perform Firestore batch write restore if historical records exist in package
+        const certsToBatchRestore = clonePackageData.masterDatabase?.certificates || clonePackageData.certificates || clonePackageData.sheetData?.certificates || (Array.isArray(clonePackageData) ? clonePackageData : []);
+        let fsMsg = '';
+        if (Array.isArray(certsToBatchRestore) && certsToBatchRestore.length > 0) {
+          try {
+            const fsRes = await batchRestoreCertificatesToFirebase(certsToBatchRestore);
+            fsMsg = ` (Firestore-এ ${fsRes.count} টি রেকর্ড ${fsRes.batches} টি ব্যাচে রিস্টোর হইয়াছে)`;
+          } catch (fsErr) {
+            console.warn('Firestore batch restore during clone warning:', fsErr);
+          }
+        }
+
+        setBackupMessage({
+          text: (data.message || 'প্রজেক্ট রিস্টোর / নতুন ইউনিয়ন প্রজেক্ট ক্লোনিং সফলভাবে সম্পন্ন হইয়াছে!') + fsMsg,
+          type: 'success'
+        });
+        if (data.upConfig) {
+          onUpdateConfig(data.upConfig);
+          setFormData(data.upConfig);
+        }
+        setShowCloneWizard(false);
+      } else {
+        setBackupMessage({ text: data.message || 'ক্লোনিং ব্যর্থ হইয়াছে।', type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMessage({ text: 'ক্লোনিং প্রসেস ত্রুটি: ' + err.message, type: 'error' });
+    } finally {
+      setIsImportingClone(false);
+    }
+  };
+
+  const handleFirestoreJsonFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        let certs: any[] = [];
+        if (Array.isArray(json)) {
+          certs = json;
+        } else if (json && typeof json === 'object') {
+          certs = json.masterDatabase?.certificates || json.certificates || json.sheetData?.certificates || json.records || [];
+        }
+
+        setFirestoreImportFile(file);
+        setFirestoreImportCerts(certs);
+        setFirestoreBatchResult(null);
+      } catch (err) {
+        alert('অবৈধ JSON ফাইল। অনুগ্রহ করে সঠিক ব্যাকআপ JSON সিলেক্ট করুন।');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExecuteFirestoreBatchRestore = async () => {
+    if (firestoreImportCerts.length === 0) {
+      alert('ফাইলে কোনো সনদের বা নাগরিক ডাটার রেকর্ড পাওয়া যায়নি।');
+      return;
+    }
+
+    setIsBatchRestoringFirestore(true);
+    setBackupMessage(null);
+
+    try {
+      const result = await batchRestoreCertificatesToFirebase(firestoreImportCerts);
+      setFirestoreBatchResult(result);
+      setBackupMessage({
+        text: `🔥 Firestore ডাটাবেসে ব্যাচ রাইট (Batch Write) এর মাধ্যমে সফলভাবে ${result.count} টি ঐতিহাসিক রেকর্ড (${result.batches} টি ব্যাচ অপারেশন) রিস্টোর করা হইয়াছে!`,
+        type: 'success'
+      });
+
+      // Also sync to Express backend database memory
+      fetch('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certificates: firestoreImportCerts })
+      }).catch(err => console.warn('Server restore sync warning:', err));
+
+    } catch (err: any) {
+      console.error('Firestore batch restore error:', err);
+      setBackupMessage({
+        text: 'Firestore ব্যাচ রাইট রিস্টোর ব্যর্থ হইয়াছে: ' + (err.message || String(err)),
+        type: 'error'
+      });
+    } finally {
+      setIsBatchRestoringFirestore(false);
+    }
+  };
+  
+  // Certificate Types Editing State
+  const [certSearch, setCertSearch] = useState('');
+  const [selectedCertKey, setSelectedCertKey] = useState<string>('citizenship');
+  const [editingCertPrompt, setEditingCertPrompt] = useState<string>('');
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const sanitizedConfig = sanitizeObject(formData);
+      const res = await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sanitizedConfig)
+      });
+      const data = await res.json();
+      
+      // Sync config to Firebase Firestore as well
+      saveConfigToFirebase(sanitizedConfig).catch(err =>
+        console.warn('Firebase config sync warning:', err)
+      );
+
+      // Log action to Activity Audit Trail
+      addAuditLogToFirebase({
+        action: 'CONFIG_UPDATED',
+        actionTitle: 'ইউনিয়ন পরিষদ মাস্টার সেটিংস আপডেট',
+        details: `ইউপি তথ্য (${sanitizedConfig.upName}), চেয়ারম্যান (${sanitizedConfig.chairmanName}), ও সেটিংস কনফিগারেশন রিয়েল-টাইমে ক্লাউডে আপডেট করা হইয়াছে।`,
+        performedByEmail: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).email : 'baheratailunion@gmail.com',
+        performedByName: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).name : 'সুপার এডমিন',
+        performedByRole: localStorage.getItem('bup_active_admin_session') ? JSON.parse(localStorage.getItem('bup_active_admin_session')!).role : 'super_admin'
+      }).catch(err => console.warn('Audit log write warning:', err));
+
+      if (data.success && data.config) {
+        onUpdateConfig(data.config);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      }
+    } catch (e) {
+      console.error('Error saving config:', e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const selectedCertType = CERTIFICATE_TYPES.find(t => t.key === selectedCertKey) || CERTIFICATE_TYPES[0];
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Top Banner & Title */}
+      <div className="bg-white p-5 rounded-2xl shadow-md border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-emerald-950 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-emerald-700" />
+            <span>অ্যাডমিন মাস্টার কন্ট্রোল ও সিস্টেম কনফিগারেশন</span>
+          </h2>
+          <p className="text-xs text-slate-500">
+            ইউনিয়ন পরিষদের নাম, চেয়ারম্যান/সচিব, লোগো, অ্যাপস স্ক্রিপ্ট, Cloudflare R2 এবং AI প্রম্পট সংশোধন করুন।
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsTemplateManagerOpen(true)}
+            className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileText className="w-4 h-4 text-slate-950" />
+            <span>গুগল ডক টেমপ্লেট গাইড</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAppsScriptOpen(true)}
+            className="px-3.5 py-2 bg-emerald-900 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Code className="w-4 h-4 text-amber-300" />
+            <span>Apps Script কোড</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Admin Tab Chooser */}
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-slate-200/70 p-1.5 rounded-2xl border border-slate-300/80">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'pending'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-800 hover:bg-slate-300/80'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-amber-300" />
+          <span>১. চেয়ারম্যান অনুমোদন পেন্ডিং (Pending Approvals)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'general'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Building2 className="w-4 h-4 text-amber-300" />
+          <span>২. ইউপি ও অফিসার তথ্য</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('print')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'print'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Sliders className="w-4 h-4 text-amber-300" />
+          <span>২. সিল, লোগো ও ফি</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('workspace')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'workspace'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Database className="w-4 h-4 text-amber-300" />
+          <span>৩. গুগল ওয়ার্কস্পেস ও ড্রাইভার</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('r2')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'r2'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Cloud className="w-4 h-4 text-amber-300" />
+          <span>৪. Cloudflare R2 / S3</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'ai'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-300" />
+          <span>৫. Gemini AI ও প্রম্পট</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('types')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'types'
+              ? 'bg-emerald-900 text-white shadow-sm'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Award className="w-4 h-4 text-amber-300" />
+          <span>৬. ৪০+ সনদ ক্যাটাগরি</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('backup')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'backup'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <FolderArchive className="w-4 h-4 text-amber-300" />
+          <span>৭. ব্যাকআপ ও রিস্টোর (Archive Drive)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('maintenance')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'maintenance'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Wrench className="w-4 h-4 text-amber-300" />
+          <span>৮. সিস্টেম মেইনটেন্যান্স (System Maintenance)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('api_webhook')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'api_webhook'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Radio className="w-4 h-4 text-amber-300 animate-pulse" />
+          <span>৯. API ও ওয়েবহুক (API & Webhooks)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('council_members')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'council_members'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <Users className="w-4 h-4 text-amber-300" />
+          <span>১০. পরিষদ সদস্য ও কর্মকর্তা ব্যবস্থাপনা (২৭ জন)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('multi_admin')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'multi_admin'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-amber-300" />
+          <span>১১. একাধিক এডমিন ও গুগল লগইন (Firebase Auth / OAuth 2.0)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('role_management')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'role_management'
+              ? 'bg-emerald-900 text-amber-300 shadow-md ring-2 ring-amber-400/50'
+              : 'text-slate-700 hover:bg-slate-300/80'
+          }`}
+        >
+          <UserCog className="w-4 h-4 text-amber-300" />
+          <span>১২. ডায়নামিক রোল ও পারমিশন কন্ট্রোল (Role Management Matrix)</span>
+        </button>
+      </div>
+
+      {/* TAB 0: Pending Approvals for Chairman */}
+      {activeTab === 'pending' && (
+        <PendingApprovals config={formData} />
+      )}
+
+      {/* TAB 8: System Maintenance Section */}
+      {activeTab === 'maintenance' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-6 rounded-2xl shadow-lg border border-slate-700/80 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full text-xs font-extrabold">
+                  <Wrench className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '6s' }} />
+                  <span>সিস্টেম মেইনটেন্যান্স ও গুগল ড্রাইভ ডাটাবেস স্ন্যাপশট সেন্টার</span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  সিস্টেম মেইনটেন্যান্স ও গুগল শিট ম্যানুয়াল স্ন্যাপশট
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                  ইউনিয়ন পরিষদের প্রাইমারি গুগল শিট ডাটাবেসের সচলতা পর্যবেক্ষণ করুন এবং সরাসরি নির্ধারিত 'Backup' গুগল ড্রাইভ ফোল্ডারে ম্যানুয়াল স্ন্যাপশট ট্রিগার করুন।
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/20 shrink-0 text-xs space-y-1.5">
+                <div className="flex items-center justify-between gap-4 text-slate-200">
+                  <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-emerald-400" /> প্রাইমারি শিট স্ট্যাটাস:</span>
+                  <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                    {maintHealth?.primarySheetStatus === 'connected' ? 'সংযুক্ত (Online)' : 'কনফিগারেশন প্রয়োজন'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-slate-200">
+                  <span className="flex items-center gap-1.5"><Server className="w-3.5 h-3.5 text-amber-400" /> অ্যাপস স্ক্রিপ্ট ওয়েবহুক:</span>
+                  <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                    {maintHealth?.appsScriptStatus === 'active' ? 'সক্রিয় (Linked)' : 'সংযুক্ত নয়'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Maintenance Notification Banner */}
+          {maintMessage && (
+            <div className={`p-4 rounded-2xl text-xs font-bold border flex items-center justify-between ${
+              maintMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                : 'bg-rose-50 text-rose-900 border-rose-300'
+            }`}>
+              <div className="flex items-center gap-2">
+                {maintMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                )}
+                <span>{maintMessage.text}</span>
+              </div>
+              <button
+                onClick={() => setMaintMessage(null)}
+                className="text-xs font-bold underline cursor-pointer hover:opacity-80"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          )}
+
+          {/* System Health Diagnostics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 block">প্রাইমারি শিট আইডি</span>
+                <span className="font-mono text-xs font-black text-slate-900 truncate block max-w-[140px]">
+                  {maintHealth?.primarySheetId || formData.sheetId || 'SHEET_PRIMARY_DB_ID'}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                <FolderArchive className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 block">নির্ধারিত 'Backup' ফোল্ডার</span>
+                <span className="font-mono text-xs font-black text-slate-900 truncate block max-w-[140px]">
+                  {designatedBackupFolder || formData.archiveFolderId || 'DESIGNATED_BACKUP_FOLDER'}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 shrink-0">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 block">মোট ডাটাবেস রেকর্ড</span>
+                <span className="text-base font-black text-slate-900 block">
+                  {maintHealth?.totalRecords ?? 0} টি সংরক্ষিত
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+                <Zap className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 block">সর্বশেষ স্ন্যাপশট সময়</span>
+                <span className="text-[11px] font-mono font-bold text-slate-900 block">
+                  {maintHealth?.lastSnapshotDate
+                    ? new Date(maintHealth.lastSnapshotDate).toLocaleTimeString('bn-BD')
+                    : 'এখনো নেওয়া হয় নাই'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Trigger Manual Snapshot to Designated Backup Folder Box */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+              <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-emerald-700" />
+                <span>প্রাইমারি গুগল শিট ম্যানুয়াল স্ন্যাপশট ট্রিগার (Manual Snapshot Trigger)</span>
+              </h4>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 inline-flex items-center gap-1">
+                <Zap className="w-3.5 h-3.5 text-amber-600" />
+                <span>'Backup' গুগল ড্রাইভ ফোল্ডারে সিঙ্ক</span>
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    নির্ধারিত 'Backup' গুগল ড্রাইভ ফোল্ডার আইডি (Designated Backup Drive Folder ID)
+                  </label>
+                  <div className="relative">
+                    <FolderArchive className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={designatedBackupFolder}
+                      onChange={(e) => setDesignatedBackupFolder(e.target.value)}
+                      placeholder="যেমন: 1A2B3C4D5E6F_DESIGNATED_BACKUP_FOLDER"
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    এই ড্রাইভ ফোল্ডারে প্রাইমারি গুগল শিট ডাটাবেসের সম্পূর্ণ কপি ও স্ন্যাপশট সংরক্ষিত হইবে।
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    স্ন্যাপশটের বিবরণ / নোট (Snapshot Memo)
+                  </label>
+                  <input
+                    type="text"
+                    value={maintNotes}
+                    onChange={(e) => setMaintNotes(e.target.value)}
+                    placeholder="যেমন: সফটওয়্যার আপডেট ও সিস্টেম মেইনটেন্যান্স পূর্ববর্তী ম্যানুয়াল স্ন্যাপশট"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center gap-3 border-t border-slate-100">
+                <button
+                  onClick={handleTriggerManualSheetSnapshot}
+                  disabled={isTriggeringMaintSnapshot}
+                  className="px-6 py-3 bg-gradient-to-r from-emerald-800 to-slate-900 hover:from-emerald-700 hover:to-slate-800 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2.5 disabled:opacity-50 cursor-pointer active:scale-95"
+                >
+                  {isTriggeringMaintSnapshot ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                      <span>প্রাইমারি শিট স্ন্যাপশট ট্রিগার করা হইতেছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                      <span>প্রাইমারি গুগল শিট ডাটাবেস ম্যানুয়াল স্ন্যাপশট ট্রিগার করুন</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleClearSystemCache}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 transition flex items-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4 text-slate-700" />
+                  <span>সিস্টেম ক্যাশ ক্লিয়ার করুন</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Maintenance Snapshots Audit Table */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-emerald-700" />
+                <span>মেইনটেন্যান্স ও ম্যানুয়াল স্ন্যাপশট ইতিহাস (Snapshot Log)</span>
+              </h4>
+              <button
+                onClick={() => {
+                  fetchMaintenanceStatus();
+                  fetchBackupsList();
+                }}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-700" />
+                <span>লগ রিফ্রেশ</span>
+              </button>
+            </div>
+
+            {backupsList.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-xs font-medium bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                কোনো মেইনটেন্যান্স স্ন্যাপশট লগ পাওয়া যায় নাই।
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <th className="p-3">তারিখ ও সময়</th>
+                      <th className="p-3">স্ন্যাপশট ফাইল</th>
+                      <th className="p-3">নির্ধারিত 'Backup' ফোল্ডার</th>
+                      <th className="p-3 text-center">রেকর্ড সংখ্যা</th>
+                      <th className="p-3">নোট / বিবরণ</th>
+                      <th className="p-3 text-center">স্ট্যাটাস</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-semibold text-slate-800">
+                    {backupsList.map((snap) => (
+                      <tr key={snap.id} className="hover:bg-slate-50 transition">
+                        <td className="p-3 font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                          {new Date(snap.timestamp).toLocaleString('bn-BD')}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-emerald-900 flex items-center gap-1.5 whitespace-nowrap">
+                          <FileJson className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>{snap.filename}</span>
+                        </td>
+                        <td className="p-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                          {snap.archiveFolderId ? `${snap.archiveFolderId.slice(0, 16)}...` : 'N/A'}
+                        </td>
+                        <td className="p-3 text-center font-bold text-slate-900">
+                          {snap.recordsCount} টি
+                        </td>
+                        <td className="p-3 text-slate-600 max-w-xs truncate">
+                          {snap.notes || 'ম্যানুয়াল স্ন্যাপশট'}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>সংরক্ষিত</span>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 7: Backup & Restore Utility */}
+      {activeTab === 'backup' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-950 via-emerald-800 to-slate-900 text-white p-6 rounded-2xl shadow-lg border border-emerald-700/50 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full text-xs font-extrabold">
+                  <FolderArchive className="w-3.5 h-3.5 text-amber-300 animate-bounce" />
+                  <span>সম্পূর্ণ প্রজেক্ট ক্লোন, ব্যাকআপ ও মাল্টি-ইউনিয়ন সেটআপ সিস্টেম</span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  সম্পূর্ণ প্রজেক্ট ব্যাকআপ প্যাকেজ ও ক্লোনিং উইজার্ড
+                </h3>
+                <p className="text-xs text-emerald-100/90 leading-relaxed max-w-2xl">
+                  এই পুরো ডিজিটাল ইউনিয়ন পরিষদ সিস্টেমটি (৪০+ সনদের ফরম্যাট, AI প্রম্পট, গুগল অ্যাপস স্ক্রিপ্ট কোড, মাস্টার ডাটাবেস ও কনফিগারেশন) এক ক্লিকে সম্পূর্ণ ব্যাকআপ ফাইল (.json) হিসেবে ডাউনলোড করুন এবং পরবর্তীতে বা অন্য যেকোনো ইউনিয়ন পরিষদের জন্য ব্যবহার/ক্লোন করুন।
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/20 shrink-0 text-xs space-y-1">
+                <div className="flex items-center justify-between gap-3 text-slate-200">
+                  <span>সর্বশেষ ব্যাকআপ:</span>
+                  <span className="font-mono font-bold text-amber-300">
+                    {formData.lastBackupDate
+                      ? new Date(formData.lastBackupDate).toLocaleString('bn-BD')
+                      : 'এখনো ব্যাকআপ নেওয়া হয় নাই'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-slate-200">
+                  <span>প্রাইমারি শিট আইডি:</span>
+                  <span className="font-mono text-[11px] text-emerald-200">
+                    {formData.sheetId ? `${formData.sheetId.slice(0, 10)}...` : 'কনফিগার করা নাই'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Backup Message Notification */}
+          {backupMessage && (
+            <div className={`p-4 rounded-2xl text-xs font-bold border flex items-center justify-between ${
+              backupMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                : 'bg-rose-50 text-rose-900 border-rose-300'
+            }`}>
+              <div className="flex items-center gap-2">
+                {backupMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                )}
+                <span>{backupMessage.text}</span>
+              </div>
+              <button
+                onClick={() => setBackupMessage(null)}
+                className="text-xs font-bold underline cursor-pointer hover:opacity-80"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          )}
+
+          {/* DEVELOPER ROLE: FIRESTORE DATABASE EXPORT CARD */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-2xl shadow-xl border border-indigo-500/40 space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-indigo-800/80 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-xl shrink-0">
+                  <Code className="w-6 h-6 text-amber-300" />
+                </div>
+                <div>
+                  <h4 className="font-black text-base text-white flex items-center gap-2">
+                    <span>🔥 ডেভেলপার রোল: Firestore ডাটাবেস এক্সপোর্ট (Cloud Storage & JSON)</span>
+                    <span className="px-2.5 py-0.5 bg-indigo-500/30 text-indigo-200 text-[10px] rounded-md font-extrabold border border-indigo-400/40">
+                      Developer Exclusive
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-300">
+                    নির্দিষ্ট Firestore কালেকশন সিলেক্ট করে JSON ব্যাকআপ তৈরি করুন এবং সরাসরি Firebase Cloud Storage-এ সংরক্ষণ করুন।
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Collection Selector & Export Settings */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-indigo-200 mb-2">
+                  ব্যাকআপের জন্য নির্দিষ্ট ফায়ারস্টোর কালেকশন সমূহ সিলেক্ট করুন:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+                  {[
+                    { key: 'certificates', label: 'certificates' },
+                    { key: 'configs', label: 'configs' },
+                    { key: 'apiKeys', label: 'apiKeys' },
+                    { key: 'webhooks', label: 'webhooks' },
+                    { key: 'backups', label: 'backups' }
+                  ].map(col => (
+                    <button
+                      key={col.key}
+                      type="button"
+                      onClick={() => handleToggleDevCollection(col.key)}
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                        developerSelectedCollections.includes(col.key)
+                          ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md font-black'
+                          : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      <span>{col.key}</span>
+                      {developerSelectedCollections.includes(col.key) && (
+                        <CheckCircle2 className="w-4 h-4 text-slate-950 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    ব্যাকআপ নোট / বিবরণী:
+                  </label>
+                  <input
+                    type="text"
+                    value={developerExportNotes}
+                    onChange={(e) => setDeveloperExportNotes(e.target.value)}
+                    placeholder="যেমন: ডেভেলপার ডাটাবেস এক্সপোর্ট..."
+                    className="w-full px-3.5 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExecuteDeveloperFirestoreExport}
+                  disabled={isExportingFirestoreDev || developerSelectedCollections.length === 0}
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95 shrink-0"
+                >
+                  {isExportingFirestoreDev ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      <span>ফায়ারস্টোর এক্সপোর্ট হইতেছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <HardDrive className="w-4 h-4 text-slate-950" />
+                      <span>🔥 Firestore এক্সপোর্ট ট্রিগার করুন</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Export Progress Bar & Real-time Status Notification */}
+            {isExportingFirestoreDev && devExportProgress && (
+              <div className="bg-slate-900/90 p-4 rounded-xl border border-amber-400/50 space-y-3 animate-fade-in shadow-inner">
+                <div className="flex items-center justify-between text-xs font-extrabold">
+                  <span className="text-amber-300 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                    <span>এক্সপোর্ট প্রোগ্রেস:</span>
+                    <span className="text-white font-mono bg-amber-400/20 px-2 py-0.5 rounded border border-amber-400/30">
+                      {devExportProgress.stage}
+                    </span>
+                  </span>
+                  <span className="text-amber-400 font-mono text-sm font-black">
+                    {devExportProgress.percent}%
+                  </span>
+                </div>
+
+                {/* Progress Bar Track */}
+                <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700 p-0.5 relative">
+                  <div
+                    className="bg-gradient-to-r from-amber-400 via-teal-400 to-emerald-400 h-full rounded-full transition-all duration-300 shadow-md relative"
+                    style={{ width: `${Math.max(5, devExportProgress.percent)}%` }}
+                  >
+                    <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                  <span>
+                    {devExportProgress.currentCol ? `বর্তমান কালেকশন: ${devExportProgress.currentCol}` : 'প্রসেসিং...'}
+                  </span>
+                  <span>
+                    {devExportProgress.percent < 70 ? 'মেমরি হতে ফেচিং...' : devExportProgress.percent < 90 ? 'ক্লাউড স্টোরেজে আপলোডিং...' : 'লগ হিস্ট্রি রাইটিং...'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Export Result Display */}
+            {firestoreDevExportResult && (
+              <div className="bg-emerald-950/80 p-4 rounded-xl border border-emerald-500/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-800/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span className="font-extrabold text-xs text-white">
+                      ফায়ারস্টোর এক্সপোর্ট সম্পন্ন! মোট {firestoreDevExportResult.totalDocuments} টি ডকুমেন্ট ({firestoreDevExportResult.sizeKb} KB)
+                    </span>
+                  </div>
+                  <span className="font-mono text-[11px] text-amber-300">
+                    {firestoreDevExportResult.filename}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  {Object.entries(firestoreDevExportResult.collections).map(([col, count]) => (
+                    <span key={col} className="px-2.5 py-1 bg-emerald-900/90 text-emerald-200 border border-emerald-600/50 rounded-lg font-mono">
+                      {col}: <strong>{count}</strong> docs
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadDevExportJson}
+                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>JSON ব্যাকআপ ডাউনলোড করুন</span>
+                  </button>
+
+                  {firestoreDevExportResult.downloadUrl ? (
+                    <a
+                      href={firestoreDevExportResult.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Cloud className="w-4 h-4 text-amber-300" />
+                      <span>Firebase Cloud Storage ফাইল ভিউ</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-slate-300 font-mono">
+                      * Storage Path: {firestoreDevExportResult.storagePath || 'backups/firestore_exports/' + firestoreDevExportResult.filename}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* FIRESTORE BATCH WRITE IMPORT & RESTORE CARD */}
+          <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-6 rounded-2xl shadow-xl border border-emerald-500/40 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-800/80 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 rounded-xl">
+                  <Database className="w-6 h-6 text-amber-300" />
+                </div>
+                <div>
+                  <h4 className="font-black text-base text-white flex items-center gap-2">
+                    <span>🔥 Firestore ডাটাবেস 'Import & Restore' (Batch Write System)</span>
+                    <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 text-[10px] rounded-md font-bold border border-amber-400/40">
+                      Batched 400-Writes / Commit
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-300">
+                    ঐতিহাসিক ব্যাকআপ JSON ফাইল আপলোড করিয়া সরাসরি Firestore ডাটাবেসে ব্যাচ রাইট (Batch Write) অপস পরিচালনা করুন
+                  </p>
+                </div>
+              </div>
+
+              <label className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer active:scale-95 shrink-0">
+                <Upload className="w-4 h-4 text-slate-950" />
+                <span>JSON ফাইল সিলেক্ট করুন</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFirestoreJsonFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {/* File Details & Restore Execution Block */}
+            {firestoreImportFile ? (
+              <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/15 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-300">নির্বাচিত ফাইল: </span>
+                    <span className="font-bold text-amber-300 font-mono">{firestoreImportFile.name}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-300">শনাক্তকৃত ঐতিহাসিক রেকর্ড: </span>
+                    <span className="px-2 py-0.5 bg-emerald-500/30 text-emerald-200 rounded-md font-mono font-black text-sm border border-emerald-400/40">
+                      {firestoreImportCerts.length} টি রেকর্ড
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-white/10">
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    * এই অপারেশনে Firestore SDK-এর `writeBatch` ব্যবহার করে প্রতি ব্যাচে সর্বোচ্চ 400 টি রেকর্ড রাইট করা হইবে।
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleExecuteFirestoreBatchRestore}
+                    disabled={isBatchRestoringFirestore || firestoreImportCerts.length === 0}
+                    className="w-full sm:w-auto px-6 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {isBatchRestoringFirestore ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                        <span>Firestore-এ ব্যাচ রাইট হইতেছে...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 text-slate-950" />
+                        <span>Firestore-এ {firestoreImportCerts.length} টি রেকর্ড ব্যাচ রিস্টোর করুন</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4 bg-white/5 rounded-xl border border-dashed border-white/20 text-xs text-slate-300">
+                <p>ফাইল নির্বাচন করা হয়নি। ফায়ারস্টোরে ঐতিহাসিক রেকর্ড রিস্টোর করতে একটি ব্যাকআপ `.json` ফাইল সিলেক্ট করুন।</p>
+              </div>
+            )}
+
+            {firestoreBatchResult && (
+              <div className="p-3 bg-emerald-900/80 border border-emerald-500/60 rounded-xl text-xs font-bold text-emerald-200 flex items-center justify-between">
+                <span>
+                  সফল ব্যাচ রাইট ফলাফল: মোট {firestoreBatchResult.count} টি রেকর্ড, {firestoreBatchResult.batches} টি Commit ব্যাচে সম্পন্ন হইয়াছে!
+                </span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+            )}
+          </div>
+
+          {/* PROJECT CLONE EXPORTER & IMPORT WIZARD CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Box A: Download Full Project Clone Package */}
+            <div className="bg-gradient-to-br from-emerald-900 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-emerald-700/60 space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-emerald-700/50 pb-3">
+                  <Download className="w-6 h-6 text-amber-300 shrink-0" />
+                  <div>
+                    <h4 className="font-black text-sm text-white">১. সম্পূর্ণ প্রজেক্ট প্যাকেজ এক্সপোর্ট (Full Project Backup)</h4>
+                    <p className="text-[11px] text-emerald-200">সকল ফাইল, ৪০+ সনদের ফরম্যাট, AI রুলস ও ডাটাবেস এক ফাইলে এক্সপোর্ট</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  এই প্যাকেজে সম্পূর্ণ প্রজেক্টের উৎস কোড গাইড, অ্যাপস স্ক্রিপ্ট টেমপ্লেট (`Code.gs`, `Gemini.gs`, `Index.html`), ৪০+ সনদের ক্যাটাগরি ও কনফিগারেশন, মাস্টার সিটিজেন ডাটাবেস এবং সকল সিস্টেম সেটিংস সংযুক্ত থাকিবে।
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleExportProjectClonePackage}
+                  disabled={isExportingClone}
+                  className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <FileJson className="w-4 h-4 text-slate-950" />
+                  <span>ডাউনলোড সম্পূর্ণ প্রজেক্ট ক্লোন প্যাকেজ (.json)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Box B: Import / Clone Wizard for New UP */}
+            <div className="bg-gradient-to-br from-slate-900 to-emerald-950 text-white p-6 rounded-2xl shadow-md border border-slate-700 space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-slate-700 pb-3">
+                  <RotateCcw className="w-6 h-6 text-emerald-400 shrink-0" />
+                  <div>
+                    <h4 className="font-black text-sm text-white">২. প্রজেক্ট রিস্টোর ও অন্য ইউনিয়নের জন্য ক্লোনিং উইজার্ড</h4>
+                    <p className="text-[11px] text-slate-300">ব্যাকআপ ফাইল দিয়ে রিস্টোর করুন অথবা নতুন ইউপি হিসেবে সেটআপ দিন</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  আপনার কাছে থাকা ব্যাকআপ `.json` ফাইলটি আপলোড করুন। ফাইলটি আপলোড করার পর আপনি চাইলে হুবহু ডাটা রিস্টোর করতে পারিবেন, অথবা নতুন ইউনিয়নের নাম বসিয়ে প্রজেক্টটিকে অন্য ইউপির জন্য ক্লোন করিতে পারিবেন।
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <label className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+                  <Upload className="w-4 h-4 text-amber-300" />
+                  <span>প্রজেক্ট ব্যাকআপ JSON আপলোড ও উইজার্ড রান করুন</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleClonePackageFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Backup Controls & Configuration */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Create Snapshot Box */}
+            <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-5">
+              <h4 className="font-extrabold text-sm text-emerald-950 border-b border-slate-200 pb-3 flex items-center gap-2">
+                <HardDrive className="w-5 h-5 text-emerald-700" />
+                <span>৩. গুগল ড্রাইভ ফোল্ডারে নিয়মিত স্ন্যাপশট প্রস্তুতকরণ (Drive Snapshot)</span>
+              </h4>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    সেকেন্ডারি 'Archive' গুগল ড্রাইভ ফোল্ডার আইডি (Archive Folder ID)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <FolderArchive className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={archiveFolderInput}
+                        onChange={(e) => setArchiveFolderInput(e.target.value)}
+                        placeholder="যেমন: 1A2B3C4D5E6F_ARCHIVE_FOLDER_ID"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    এই ড্রাইভ ফোল্ডারে মাস্টার গুগল শিটের কপি ও ব্যাকআপ ফাইলসমূহ স্ন্যাপশট হিসেবে জমা হইবে।
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    স্ন্যাপশট নোট বা ব্যাকআপের বিবরণ (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="text"
+                    value={backupNotes}
+                    onChange={(e) => setBackupNotes(e.target.value)}
+                    placeholder="যেমন: আগস্ট ২০২৬ মাসের সাপ্তাহিক নিয়মিত ড্রাইভ ব্যাকআপ"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsBackupManagerOpen(true)}
+                    className="px-6 py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95"
+                  >
+                    <Cloud className="w-4 h-4 text-slate-950" />
+                    <span>🔥 Firestore এক্সপোর্ট ও ক্লাউড ব্যাকআপ ম্যানেজার</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTriggerBackup}
+                    disabled={isBackingUp}
+                    className="px-5 py-3 bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {isBackingUp ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                        <span>ড্রাইভ ব্যাকআপ প্রক্রিয়াধীন...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderArchive className="w-4 h-4 text-amber-300" />
+                        <span>ড্রাইভ 'Archive' ফোল্ডারে স্ন্যাপশট</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href="/api/admin/export"
+                    download="union_master_db.csv"
+                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-700" />
+                    <span>CSV ডাউনলোড</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick CSV / JSON Info Box */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-3 flex flex-col justify-between">
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+                  <FileJson className="w-5 h-5 text-emerald-700" />
+                  <span>ব্যাকআপ ফাইল কীভাবে রূপান্তর ও পুনঃব্যবহার করবেন?</span>
+                </h4>
+                <ul className="text-xs text-slate-700 space-y-2 mt-3 list-disc pl-4 font-medium">
+                  <li><strong>১. সম্পূর্ণ প্রজেক্ট ব্যাকআপ:</strong> যেকোনো সময় ফাইলটি ডাউনলোড করে সংরক্ষণ করুন। এতে ৪০+ সনদ ও গুগল অ্যাপস স্ক্রিপ্ট কোড সংরক্ষিত থাকে।</li>
+                  <li><strong>২. নতুন ইউনিয়নে স্থাপন:</strong> যেকোনো জায়গায় ফাইলটি আপলোড করে "নতুন ইউনিয়ন পরিষদের জন্য ক্লোনিং" অপশনে ক্লিক করে নতুন নাম দিলে সাথে সাথে সিস্টেম নতুন ইউপি রূপ লাভ করবে।</li>
+                  <li><strong>৩. গুগল ড্রাইভ ডাটাবেস:</strong> আপনার গুগল শিট বা ড্রাইভে ব্যাকআপ রাখতে প্রতি সপ্তাহে ১বার স্ন্যাপশট বাটন চাপুন।</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Backup History Table */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div>
+                <h4 className="font-extrabold text-sm text-emerald-950 flex items-center gap-2">
+                  <FolderArchive className="w-5 h-5 text-emerald-700" />
+                  <span>সংরক্ষিত ডাটাবেস ব্যাকআপ হিস্টোরি (Firebase Cloud Storage & Snapshots)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                  ফায়ারবেস ক্লাউড স্টোরেজ ও সার্ভার স্ন্যাপশট ব্যাকআপ ডাউনলোড বা এক ক্লিকে রিস্টোর করুন।
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="ফাইল নাম বা নোটস খুঁজুন..."
+                  value={backupSearchTerm}
+                  onChange={(e) => setBackupSearchTerm(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none w-48 sm:w-64"
+                />
+                <button
+                  type="button"
+                  onClick={fetchBackupsList}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>রিফ্রেশ</span>
+                </button>
+              </div>
+            </div>
+
+            {backupsList.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-xs font-medium bg-slate-50 rounded-xl border border-dashed border-slate-300 space-y-2">
+                <p>কোনো সংরক্ষিত ব্যাকআপ স্ন্যাপশট পাওয়া যায় নাই।</p>
+                <p className="text-[11px] text-slate-400">নতুন ফায়ারস্টোর এক্সপোর্ট বা ড্রাইভে স্ন্যাপশট তৈরি করতে উপরে দেখুন।</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <th className="p-3">তারিখ ও সোর্স</th>
+                      <th className="p-3">ফাইল নাম ও কালেকশন তথ্য</th>
+                      <th className="p-3">স্টোরেজ লোকেশন</th>
+                      <th className="p-3 text-center">রেকর্ড সংখ্যা</th>
+                      <th className="p-3 text-center">সাইজ</th>
+                      <th className="p-3 text-center">স্ট্যাটাস</th>
+                      <th className="p-3 text-right">অ্যাকশন</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-semibold text-slate-800">
+                    {backupsList
+                      .filter(b => {
+                        if (!backupSearchTerm.trim()) return true;
+                        const q = backupSearchTerm.toLowerCase();
+                        return (
+                          (b.filename && b.filename.toLowerCase().includes(q)) ||
+                          (b.notes && b.notes.toLowerCase().includes(q)) ||
+                          (b.storagePath && b.storagePath.toLowerCase().includes(q)) ||
+                          (b.archiveFolderId && b.archiveFolderId.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((bkp) => {
+                        const isCloudStorage = !!(bkp.downloadUrl || bkp.storagePath || bkp.source === 'firebase_storage');
+                        const isRestoringThis = isRestoring && restoringBackupId === bkp.id;
+                        const sizeDisplay = bkp.sizeKb >= 1024 
+                          ? `${(bkp.sizeKb / 1024).toFixed(2)} MB` 
+                          : `${bkp.sizeKb || 12} KB`;
+
+                        return (
+                          <tr key={bkp.id} className="hover:bg-slate-50/80 transition">
+                            <td className="p-3 whitespace-nowrap">
+                              <div className="font-mono text-[11px] text-slate-700">
+                                {new Date(bkp.timestamp).toLocaleString('bn-BD')}
+                              </div>
+                              <div className="mt-1">
+                                {isCloudStorage ? (
+                                  <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[10px] font-bold rounded-md inline-flex items-center gap-1 border border-sky-200">
+                                    <Cloud className="w-3 h-3 text-sky-600" />
+                                    <span>Firebase Cloud Storage</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md inline-flex items-center gap-1 border border-emerald-200">
+                                    <Server className="w-3 h-3 text-emerald-600" />
+                                    <span>Server Snapshot</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="p-3 max-w-xs">
+                              <div className="font-mono font-bold text-emerald-950 flex items-center gap-1.5 truncate">
+                                <FileJson className="w-4 h-4 text-emerald-700 shrink-0" />
+                                <span className="truncate" title={bkp.filename}>{bkp.filename}</span>
+                              </div>
+                              {bkp.notes && (
+                                <p className="text-[11px] text-slate-500 font-medium truncate mt-0.5" title={bkp.notes}>
+                                  {bkp.notes}
+                                </p>
+                              )}
+                              {bkp.collections && typeof bkp.collections === 'object' && (
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {Object.entries(bkp.collections).map(([cName, cCount]) => (
+                                    <span key={cName} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] rounded border border-slate-200">
+                                      {cName}: {cCount}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="p-3 font-mono text-[11px] text-slate-600 whitespace-nowrap max-w-[180px] truncate">
+                              {bkp.storagePath ? (
+                                <span className="text-sky-900 bg-sky-50 px-2 py-1 rounded border border-sky-100 truncate block" title={bkp.storagePath}>
+                                  {bkp.storagePath}
+                                </span>
+                              ) : bkp.archiveFolderId ? (
+                                <span className="text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-200 truncate block" title={bkp.archiveFolderId}>
+                                  Drive: {bkp.archiveFolderId.slice(0, 14)}...
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">Local Cache</span>
+                              )}
+                            </td>
+
+                            <td className="p-3 text-center font-bold text-slate-900 whitespace-nowrap">
+                              {bkp.recordsCount || 0} টি
+                            </td>
+
+                            <td className="p-3 text-center font-mono text-slate-700 whitespace-nowrap">
+                              {sizeDisplay}
+                            </td>
+
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>সম্পন্ন</span>
+                              </span>
+                            </td>
+
+                            <td className="p-3 text-right whitespace-nowrap space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadBackupFile(bkp)}
+                                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] rounded-lg transition inline-flex items-center gap-1 cursor-pointer border border-slate-300 active:scale-95"
+                                title="ডাউনলোড"
+                              >
+                                <Download className="w-3.5 h-3.5 text-emerald-700" />
+                                <span>ডাউনলোড</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreBackup(bkp)}
+                                disabled={isRestoring}
+                                className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold text-[11px] rounded-lg transition inline-flex items-center gap-1 cursor-pointer border border-amber-300 disabled:opacity-50 active:scale-95"
+                                title="ডাটাবেসে রিস্টোর করুন"
+                              >
+                                {isRestoringThis ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 text-amber-700 animate-spin" />
+                                    <span>রিস্টোরিং...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+                                    <span>রিস্টোর</span>
+                                  </>
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab !== 'pending' && activeTab !== 'backup' && (
+        <form onSubmit={handleSave} className="space-y-6">
+        {/* TAB 1: General Info */}
+        {activeTab === 'general' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <h3 className="font-bold text-sm text-emerald-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-emerald-700" />
+              <span>ইউনিয়ন পরিষদ, এলাকা ও প্রশাসনিক কর্মকর্তা সমূহের তথ্য</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  ইউনিয়ন পরিষদের নাম (বাংলায়)
+                </label>
+                <input
+                  type="text"
+                  value={formData.upName}
+                  onChange={(e) => setFormData({ ...formData, upName: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  ইউনিয়ন পরিষদের নাম (ইংরেজি)
+                </label>
+                <input
+                  type="text"
+                  value={formData.upNameEn}
+                  onChange={(e) => setFormData({ ...formData, upNameEn: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  উপজেলা ও জেলা
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={formData.upazila}
+                    onChange={(e) => setFormData({ ...formData, upazila: e.target.value })}
+                    placeholder="উপজেলা"
+                    className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-semibold"
+                  />
+                  <input
+                    type="text"
+                    value={formData.district}
+                    onChange={(e) => setFormData({ ...formData, district: e.target.value })}
+                    placeholder="জেলা"
+                    className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  যোগাযোগের নম্বর ও ইমেইল
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={formData.phone || ''}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="মোবাইল নম্বর"
+                    className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-semibold"
+                  />
+                  <input
+                    type="text"
+                    value={formData.email || ''}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="ইমেইল এড্রেস"
+                    className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  পূর্ণাঙ্গ অফিশিয়াল ঠিকানা ও পোস্ট অফিস বিবরণী
+                </label>
+                <input
+                  type="text"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-semibold"
+                />
+              </div>
+            </div>
+
+            {/* Chairman & Secretary Details */}
+            <div className="pt-2 border-t border-slate-200">
+              <p className="font-bold text-xs text-slate-800 mb-3">চেয়ারম্যান ও প্রশাসনিক কর্মকর্তার স্বাক্ষর ও মোবাইল তথ্য:</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 space-y-3">
+                  <p className="font-bold text-xs text-emerald-950">চেয়ারম্যান / প্যানেল চেয়ারম্যান</p>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">নাম</label>
+                    <input
+                      type="text"
+                      value={formData.chairmanName}
+                      onChange={(e) => setFormData({ ...formData, chairmanName: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">পদবী</label>
+                    <input
+                      type="text"
+                      value={formData.chairmanTitle}
+                      onChange={(e) => setFormData({ ...formData, chairmanTitle: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">চেয়ারম্যানের মোবাইল নম্বর</label>
+                    <input
+                      type="text"
+                      value={formData.chairmanPhone || ''}
+                      onChange={(e) => setFormData({ ...formData, chairmanPhone: e.target.value })}
+                      placeholder="যেমন: ০১৭৯৯-১১২২ ৩৩"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-mono font-bold text-emerald-900"
+                    />
+                  </div>
+
+                  {/* Chairman Digital Signature Upload */}
+                  <div className="pt-2 border-t border-emerald-200/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-bold text-emerald-950 flex items-center gap-1">
+                        <Edit3 className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>চেয়ারম্যানের ডিজিটাল স্বাক্ষর (Transparent PNG Signature)</span>
+                      </label>
+                      {formData.chairmanSignatureUrl && (
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-700" />
+                          <span>সংযুক্ত (স্বচ্ছ)</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {formData.chairmanSignatureUrl ? (
+                      <div className="relative group bg-white border border-slate-300 rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                        <div className="h-14 max-w-[200px] flex items-center justify-center overflow-hidden bg-[radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:8px_8px] rounded p-1 border border-slate-200 shadow-inner">
+                          <img
+                            src={formData.chairmanSignatureUrl}
+                            alt="Chairman Signature"
+                            className="max-h-full max-w-full object-contain filter contrast-125"
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!formData.chairmanSignatureUrl) return;
+                              const transparentUrl = await makeSignatureTransparent(formData.chairmanSignatureUrl);
+                              setFormData({ ...formData, chairmanSignatureUrl: transparentUrl });
+                            }}
+                            className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold transition flex items-center gap-1 border border-amber-300 cursor-pointer"
+                            title="কাগজের সাদা ব্যাকগ্রাউন্ড কেটে স্বচ্ছ PNG বানান"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-700" />
+                            <span>স্বচ্ছ PNG ট্রিম করুন</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, chairmanSignatureUrl: '' })}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[11px] font-bold transition flex items-center gap-1 border border-red-200 shrink-0 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>রিমুভ</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-white border-2 border-dashed border-emerald-300 rounded-lg text-center space-y-1">
+                        <p className="text-[10px] text-slate-500 font-medium">স্বচ্ছ ব্যাকগ্রাউন্ডের (PNG/JPG) ই-স্বাক্ষর ফাইল আপলোড করুন</p>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex-1 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-amber-300 font-bold text-xs rounded-lg cursor-pointer transition shadow-sm flex items-center justify-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>স্বাক্ষর ফাইল আপলোড করুন (Auto Transparent)</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = async () => {
+                                const rawUrl = reader.result as string;
+                                const cleanUrl = await makeSignatureTransparent(rawUrl);
+                                setFormData({ ...formData, chairmanSignatureUrl: cleanUrl });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={formData.chairmanSignatureUrl || ''}
+                      onChange={(e) => setFormData({ ...formData, chairmanSignatureUrl: e.target.value })}
+                      placeholder="অথবা ইমেজের URL লিংক দিন (যেমন: https://.../signature.png)"
+                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-[11px] font-mono focus:border-emerald-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 space-y-3">
+                  <p className="font-bold text-xs text-emerald-950">ইউনিয়ন পরিষদ প্রশাসনিক কর্মকর্তা (সচিব)</p>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">নাম</label>
+                    <input
+                      type="text"
+                      value={formData.secretaryName}
+                      onChange={(e) => setFormData({ ...formData, secretaryName: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">পদবী</label>
+                    <input
+                      type="text"
+                      value={formData.secretaryTitle}
+                      onChange={(e) => setFormData({ ...formData, secretaryTitle: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">সচিবের মোবাইল নম্বর</label>
+                    <input
+                      type="text"
+                      value={formData.secretaryPhone || ''}
+                      onChange={(e) => setFormData({ ...formData, secretaryPhone: e.target.value })}
+                      placeholder="যেমন: ০১৮১২-৪৪৫৫ ৬৬"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none font-mono font-bold text-emerald-900"
+                    />
+                  </div>
+
+                  {/* Secretary Digital Signature Upload */}
+                  <div className="pt-2 border-t border-emerald-200/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-bold text-emerald-950 flex items-center gap-1">
+                        <Edit3 className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>সচিবের ডিজিটাল স্বাক্ষর (Transparent PNG Signature)</span>
+                      </label>
+                      {formData.secretarySignatureUrl && (
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                          <Check className="w-3 h-3 text-emerald-700" />
+                          <span>সংযুক্ত (স্বচ্ছ)</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {formData.secretarySignatureUrl ? (
+                      <div className="relative group bg-white border border-slate-300 rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                        <div className="h-14 max-w-[200px] flex items-center justify-center overflow-hidden bg-[radial-gradient(#d1d5db_1px,transparent_1px)] [background-size:8px_8px] rounded p-1 border border-slate-200 shadow-inner">
+                          <img
+                            src={formData.secretarySignatureUrl}
+                            alt="Secretary Signature"
+                            className="max-h-full max-w-full object-contain filter contrast-125"
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!formData.secretarySignatureUrl) return;
+                              const transparentUrl = await makeSignatureTransparent(formData.secretarySignatureUrl);
+                              setFormData({ ...formData, secretarySignatureUrl: transparentUrl });
+                            }}
+                            className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold transition flex items-center gap-1 border border-amber-300 cursor-pointer"
+                            title="কাগজের সাদা ব্যাকগ্রাউন্ড কেটে স্বচ্ছ PNG বানান"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-700" />
+                            <span>স্বচ্ছ PNG ট্রিম করুন</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, secretarySignatureUrl: '' })}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[11px] font-bold transition flex items-center gap-1 border border-red-200 shrink-0 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>রিমুভ</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-white border-2 border-dashed border-emerald-300 rounded-lg text-center space-y-1">
+                        <p className="text-[10px] text-slate-500 font-medium">স্বচ্ছ ব্যাকগ্রাউন্ডের (PNG/JPG) ই-স্বাক্ষর ফাইল আপলোড করুন</p>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex-1 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-amber-300 font-bold text-xs rounded-lg cursor-pointer transition shadow-sm flex items-center justify-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>স্বাক্ষর ফাইল আপলোড করুন (Auto Transparent)</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = async () => {
+                                const rawUrl = reader.result as string;
+                                const cleanUrl = await makeSignatureTransparent(rawUrl);
+                                setFormData({ ...formData, secretarySignatureUrl: cleanUrl });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={formData.secretarySignatureUrl || ''}
+                      onChange={(e) => setFormData({ ...formData, secretarySignatureUrl: e.target.value })}
+                      placeholder="অথবা ইমেজের URL লিংক দিন (যেমন: https://.../signature.png)"
+                      className="w-full px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-[11px] font-mono focus:border-emerald-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Digital Signature Master Switches */}
+              <div className="mt-4 p-3.5 bg-emerald-50/80 rounded-xl border border-emerald-200 space-y-2">
+                <p className="font-bold text-xs text-emerald-950 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                  <span>সনদে ডিজিটাল স্বাক্ষর প্রদর্শন নিয়ন্ত্রণ:</span>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2.5 rounded-lg border border-emerald-200 hover:border-emerald-400 transition shadow-xs">
+                    <input
+                      type="checkbox"
+                      checked={formData.enableDigitalSignature !== false}
+                      onChange={(e) => setFormData({ ...formData, enableDigitalSignature: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="font-bold text-slate-800">ইস্যুকৃত সনদে ডিজিটাল স্বাক্ষর প্রদর্শন সক্রিয় রাখুন</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2.5 rounded-lg border border-emerald-200 hover:border-emerald-400 transition shadow-xs">
+                    <input
+                      type="checkbox"
+                      checked={formData.showSecretarySignature !== false}
+                      onChange={(e) => setFormData({ ...formData, showSecretarySignature: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="font-bold text-slate-800">সনদের বাম পার্শ্বে সচিবের স্বাক্ষর ব্লক প্রদর্শন করুন</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: Print & Branding & Payment Fees */}
+        {activeTab === 'print' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <h3 className="font-bold text-sm text-emerald-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-emerald-700" />
+              <span>লোগো, অফিশিয়াল সিল, জলছাপ, মোবাইল ব্যাংকিং (MFS) ও টেমপ্লেট কাস্টমাইজার</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Logo Upload Section */}
+              <div className="md:col-span-2 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 p-4 rounded-2xl border border-emerald-200/80 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black text-emerald-950 flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-emerald-700" />
+                    <span>ওয়েব অ্যাপ ও সনদের অফিশিয়াল লোগো (Web App Main Branding Logo)</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                    এডমিন কর্তৃক পরিবর্তনযোগ্য ⚙️
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-3.5 rounded-xl border border-emerald-200/60 shadow-2xs">
+                  <div className="w-24 h-24 rounded-2xl bg-slate-50 border-2 border-emerald-800/80 p-2 shadow-sm flex items-center justify-center shrink-0 relative overflow-hidden group">
+                    <img
+                      src={formData.logoUrl || '/baheratail_seal.svg'}
+                      alt="Web App Logo Preview"
+                      className="max-w-full max-h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+
+                  <div className="flex-1 w-full space-y-2.5">
+                    <p className="text-[11px] font-semibold text-slate-600">
+                      এই লোগোটি ওয়েব অ্যাপের টপ নেভিগেশন বার, সাইডবার হেডার, প্রিন্ট হেড এবং নাগরিক সনদে তাৎক্ষণিকভাবে প্রদর্শিত হবে।
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-amber-300 font-bold text-xs rounded-xl cursor-pointer transition shadow-xs flex items-center gap-1.5 active:scale-95">
+                        <Upload className="w-4 h-4 text-amber-300" />
+                        <span>📁 কম্পিউটার/মোবাইল থেকে নতুন লোগো আপলোড করুন</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setFormData({ ...formData, logoUrl: reader.result as string });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, logoUrl: '/baheratail_seal.svg' })}
+                        className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold text-xs rounded-xl transition border border-emerald-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>🟢 বহেড়াতৈল ইউপি সিল</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/84/Government_Seal_of_Bangladesh.svg' })}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition border border-slate-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>🇧🇩 সরকারি সিল</span>
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={formData.logoUrl}
+                      onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
+                      placeholder="অথবা লোগোর অনলাইন ইমেজের URL লিংক দিন (যেমন: https://.../logo.png)"
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* High-Resolution Background Watermark Seal / Logo Upload Section */}
+              <div className="md:col-span-2 bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-emerald-700" />
+                    <span>সনদের ব্যাকগ্রাউন্ড ওয়াটারমার্ক সিল/লোগো (High-Res Background Watermark)</span>
+                  </label>
+                  {formData.watermarkUrl && (
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-700" />
+                      <span>কাস্টম ওয়াটারমার্ক সেট করা আছে</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                  <div className="w-20 h-20 rounded-xl bg-white border-2 border-emerald-800/40 p-2 shadow-sm flex items-center justify-center shrink-0 overflow-hidden relative group bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:8px_8px]">
+                    <img
+                      src={formData.watermarkUrl || formData.logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/8/84/Government_Seal_of_Bangladesh.svg'}
+                      alt="Watermark Preview"
+                      className="max-w-full max-h-full object-contain filter opacity-85"
+                    />
+                  </div>
+                  <div className="flex-1 w-full space-y-2">
+                    <p className="text-[11px] text-slate-600 font-medium">
+                      হাই-রেজোলিউশন ট্র্যান্সপারেন্ট (PNG) সিল বা লোগো আপলোড করুন যা A4 প্যাডের কেন্দ্রে ব্যাকগ্রাউন্ড ওয়াটারমার্ক হিসেবে প্রদর্শিত হবে। (ফাঁকা রাখলে মূল লোগো ব্যবহার হবে)
+                    </p>
+                    <input
+                      type="text"
+                      value={formData.watermarkUrl || ''}
+                      onChange={(e) => setFormData({ ...formData, watermarkUrl: e.target.value })}
+                      placeholder="কাস্টম ওয়াটারমার্ক ইমেজের URL লিংক দিন (ঐচ্ছিক)"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono focus:border-emerald-600 focus:outline-none"
+                    />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-amber-300 font-bold text-xs rounded-lg cursor-pointer transition shadow-sm flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>ওয়াটারমার্ক সিল ফাইল আপলোড করুন</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setFormData({ ...formData, watermarkUrl: reader.result as string });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                      {formData.watermarkUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, watermarkUrl: '' })}
+                          className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg transition flex items-center gap-1 border border-red-200 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>রিমুভ করুন (হেডার লোগোতে রিসেট)</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Watermark Opacity Slider inside AdminSettings */}
+                <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between gap-4">
+                  <span className="text-xs font-bold text-slate-700">ডিফল্ট জলছাপ স্বচ্ছতা (Watermark Opacity):</span>
+                  <div className="flex items-center gap-3 w-1/2">
+                    <input
+                      type="range"
+                      min="0.02"
+                      max="0.30"
+                      step="0.01"
+                      value={formData.watermarkOpacity ?? 0.08}
+                      onChange={(e) => setFormData({ ...formData, watermarkOpacity: parseFloat(e.target.value) })}
+                      className="w-full accent-emerald-700 cursor-pointer"
+                    />
+                    <span className="font-mono text-xs font-bold text-emerald-950 bg-white px-2 py-0.5 rounded border border-emerald-300 shrink-0">
+                      {Math.round((formData.watermarkOpacity ?? 0.08) * 100)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Template Layout Customizer Options */}
+              <div className="md:col-span-2 bg-emerald-950 text-white p-4 rounded-xl space-y-3">
+                <p className="font-bold text-xs text-amber-300 flex items-center gap-1.5">
+                  <Sliders className="w-4 h-4 text-amber-400" />
+                  <span>সনদের টেমপ্লেট ও লেআউট কাস্টমাইজার সেটিংস (ইচ্ছেমতো লেআউট নির্ধারণ)</span>
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <label className="block text-emerald-200 font-bold mb-1">হেডার লেআউট স্টাইল:</label>
+                    <select
+                      value={formData.templateHeaderStyle || 'tri-column'}
+                      onChange={(e) => setFormData({ ...formData, templateHeaderStyle: e.target.value as any })}
+                      className="w-full px-2.5 py-1.5 bg-emerald-900 border border-emerald-700 text-white rounded font-bold"
+                    >
+                      <option value="tri-column">১. ৩-কলাম হেডার (ছবি অনুযায়ী)</option>
+                      <option value="centered">২. সেন্টার্ড লোগো ও টাইটেল</option>
+                      <option value="classic">৩. ক্লাসিকাল সরকারি প্যাড</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-emerald-200 font-bold mb-1">ফ্রেম বর্ডার স্টাইল:</label>
+                    <select
+                      value={formData.borderStyle || 'double-green-red'}
+                      onChange={(e) => setFormData({ ...formData, borderStyle: e.target.value as any })}
+                      className="w-full px-2.5 py-1.5 bg-emerald-900 border border-emerald-700 text-white rounded font-bold"
+                    >
+                      <option value="double-green-red">ডবল বর্ডার (সবুজ ও লাল)</option>
+                      <option value="double-green">ডবল সবুজ বর্ডার</option>
+                      <option value="single-green">একক সবুজ বর্ডার</option>
+                      <option value="none">নো বর্ডার (প্লেন কাগজ)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-emerald-200 font-bold mb-1">গোল সিল ফাঁকা স্থান (px):</label>
+                    <input
+                      type="number"
+                      value={formData.blankSealSize ?? 96}
+                      onChange={(e) => setFormData({ ...formData, blankSealSize: parseInt(e.target.value) || 0 })}
+                      className="w-full px-2.5 py-1.5 bg-emerald-900 border border-emerald-700 text-white rounded font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-emerald-200 font-bold mb-1">বডি ফন্ট সাইজ (px):</label>
+                    <input
+                      type="number"
+                      value={formData.bodyFontSize || 16}
+                      onChange={(e) => setFormData({ ...formData, bodyFontSize: parseInt(e.target.value) || 16 })}
+                      className="w-full px-2.5 py-1.5 bg-emerald-900 border border-emerald-700 text-white rounded font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* QR Code Styling & Center UP Logo Embed Settings */}
+              <div className="md:col-span-2 bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 text-white p-5 rounded-2xl border border-emerald-700/60 shadow-md space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-800/80 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-emerald-500/20 text-emerald-300 rounded-lg border border-emerald-400/30">
+                      <QrCode className="w-5 h-5 text-amber-300" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                        <span>সনদের QR কোড স্টাইলিং ও অফিসিয়াল সিল এমবেড সেটিংস</span>
+                        <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded text-[10px] font-bold">
+                          স্মার্ট সিকিউরিটি
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-emerald-200/80 font-medium">
+                        সকল সনদের স্বয়ংক্রিয় QR ভেরিফিকেশন কোডের কালার স্কিম নির্ধারণ ও সেন্টারে ইউনিয়ন পরিষদের সিল এমবেড করুন।
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                  <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    {/* Color Scheme */}
+                    <div>
+                      <label className="block text-emerald-200 font-bold mb-1">
+                        QR কোড কালার স্কিম (Color Scheme):
+                      </label>
+                      <select
+                        value={formData.qrColorScheme || 'govt-emerald'}
+                        onChange={(e) => setFormData({ ...formData, qrColorScheme: e.target.value as QrColorScheme })}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-xl font-bold focus:border-amber-400 focus:outline-none"
+                      >
+                        <option value="govt-emerald">১. সরকারি গাঢ় সবুজ (Govt Emerald)</option>
+                        <option value="classic-black">২. ক্লাসিক কালো (Monochrome Black)</option>
+                        <option value="emerald-gold">৩. রয়্যাল গোল্ড ও এমারেল্ড (Emerald & Gold)</option>
+                        <option value="govt-crimson">৪. সরকারি লাল ও সাদা (Govt Crimson)</option>
+                        <option value="navy-slate">৫. নেভি ব্লু (Deep Navy)</option>
+                        <option value="teal-cyan">৬. ডিজিটাল টিল (Digital Teal)</option>
+                        <option value="custom">৭. কাস্টম কালার প্যালেট (Custom Hex)</option>
+                      </select>
+                    </div>
+
+                    {/* Frame Style */}
+                    <div>
+                      <label className="block text-emerald-200 font-bold mb-1">
+                        QR ফ্রেম ও বর্ডার স্টাইল:
+                      </label>
+                      <select
+                        value={formData.qrFrameStyle || 'clean'}
+                        onChange={(e) => setFormData({ ...formData, qrFrameStyle: e.target.value as any })}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-xl font-bold focus:border-amber-400 focus:outline-none"
+                      >
+                        <option value="clean">ক্লিন বর্ডার (Clean Border)</option>
+                        <option value="double">ডাবল সিল ফ্রেম (Double Frame)</option>
+                        <option value="badge">ডিজিটাল ভেরিফায়েড ব্যাজ (Badge)</option>
+                        <option value="minimal">মিনিমাল নো-বর্ডার (Minimal)</option>
+                      </select>
+                    </div>
+
+                    {/* Embed Logo Toggle */}
+                    <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/80 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-white block">মাঝখানে ইউপি লোগো / সিল এমবেড</span>
+                        <span className="text-[10px] text-slate-400 block">QR কোডের সেন্টারে হাই-সিকিউরিটি ভেরিফিকেশন সিল</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.qrEmbedLogo !== false}
+                          onChange={(e) => setFormData({ ...formData, qrEmbedLogo: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                      </label>
+                    </div>
+
+                    {/* Logo Shape */}
+                    <div>
+                      <label className="block text-emerald-200 font-bold mb-1">
+                        এমবেডেড সিল শেপ:
+                      </label>
+                      <select
+                        value={formData.qrLogoShape || 'circle'}
+                        disabled={formData.qrEmbedLogo === false}
+                        onChange={(e) => setFormData({ ...formData, qrLogoShape: e.target.value as any })}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-xl font-bold focus:border-amber-400 focus:outline-none disabled:opacity-40"
+                      >
+                        <option value="circle">গোলাকার সিল (Circle)</option>
+                        <option value="rounded">রাউন্ডেড স্কয়ার (Rounded Square)</option>
+                      </select>
+                    </div>
+
+                    {/* Custom Color Settings if selected */}
+                    {formData.qrColorScheme === 'custom' && (
+                      <div className="sm:col-span-2 pt-2 border-t border-slate-700/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="flex items-center justify-between bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-700">
+                          <span className="text-slate-300 font-semibold">QR প্যাটার্ন কালার (Dark):</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={formData.qrCustomDarkColor || '#064e3b'}
+                              onChange={(e) => setFormData({ ...formData, qrCustomDarkColor: e.target.value })}
+                              className="w-7 h-7 rounded border border-slate-600 bg-transparent cursor-pointer"
+                            />
+                            <span className="font-mono text-[11px] text-amber-300 font-bold">
+                              {formData.qrCustomDarkColor || '#064e3b'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-700">
+                          <span className="text-slate-300 font-semibold">QR ব্যাকগ্রাউন্ড কালার (Light):</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={formData.qrCustomLightColor || '#ffffff'}
+                              onChange={(e) => setFormData({ ...formData, qrCustomLightColor: e.target.value })}
+                              className="w-7 h-7 rounded border border-slate-600 bg-transparent cursor-pointer"
+                            />
+                            <span className="font-mono text-[11px] text-amber-300 font-bold">
+                              {formData.qrCustomLightColor || '#ffffff'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Real-time Visual QR Preview */}
+                  <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center space-y-2">
+                    <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>লাইভ QR প্রিভিউ</span>
+                    </span>
+                    <div className="p-2 bg-white rounded-xl shadow-inner inline-block">
+                      <StyledQrCode
+                        value={`${window.location.origin}/verify?memo=TEST-PREVIEW-2026`}
+                        colorScheme={formData.qrColorScheme || 'govt-emerald'}
+                        customDarkColor={formData.qrCustomDarkColor || '#064e3b'}
+                        customLightColor={formData.qrCustomLightColor || '#ffffff'}
+                        embedLogo={formData.qrEmbedLogo !== false}
+                        logoUrl={formData.logoUrl || '/baheratail_seal.svg'}
+                        logoShape={formData.qrLogoShape || 'circle'}
+                        frameStyle={formData.qrFrameStyle || 'clean'}
+                        size={88}
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      প্রিন্টে ঠিক এই ডিজাইনের কোড প্রদর্শিত হইবে
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bangladeshi MFS Numbers Settings */}
+              <div className="md:col-span-2 bg-slate-900 text-white p-4 rounded-xl space-y-3">
+                <p className="font-bold text-xs text-amber-300 flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-amber-400" />
+                  <span>মোবাইল ব্যাংকিং (MFS) নম্বর ও নির্দেশনা সেটিংস</span>
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-pink-400 mb-1">বিকাশ (bKash) মার্চেন্ট/পার্সোনাল:</label>
+                    <input
+                      type="text"
+                      value={formData.paymentBkashNumber || '01799-112233'}
+                      onChange={(e) => setFormData({ ...formData, paymentBkashNumber: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 text-amber-300 rounded text-xs font-mono font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-orange-400 mb-1">নগদ (Nagad) মার্চেন্ট/পার্সোনাল:</label>
+                    <input
+                      type="text"
+                      value={formData.paymentNagadNumber || '01812-445566'}
+                      onChange={(e) => setFormData({ ...formData, paymentNagadNumber: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 text-amber-300 rounded text-xs font-mono font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-purple-400 mb-1">রকেট (Rocket) মার্চেন্ট/পার্সোনাল:</label>
+                    <input
+                      type="text"
+                      value={formData.paymentRocketNumber || '01911-223344'}
+                      onChange={(e) => setFormData({ ...formData, paymentRocketNumber: e.target.value })}
+                      className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 text-amber-300 rounded text-xs font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">পেমেন্ট নির্দেশনা:</label>
+                  <input
+                    type="text"
+                    value={formData.paymentInstructions || 'উক্ত নম্বরে সনদের ফি Send Money / Merchant Payment করে TrxID লিখুন।'}
+                    onChange={(e) => setFormData({ ...formData, paymentInstructions: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 text-slate-200 rounded text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Category-wise Fee Configuration */}
+              <div className="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <p className="font-bold text-xs text-emerald-950">
+                    সনদের ফি ব্যবস্থাপনা (ক্যাটাগরি ভিত্তিক চার্জ বসান):
+                  </p>
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="text-slate-600">ডিফল্ট ফি:</span>
+                    <input
+                      type="number"
+                      value={formData.certificateFeeDefault || 50}
+                      onChange={(e) => setFormData({ ...formData, certificateFeeDefault: parseInt(e.target.value) || 0 })}
+                      className="w-16 px-2 py-0.5 bg-white border border-slate-300 rounded text-xs font-bold text-emerald-900"
+                    />
+                    <span>টাকা</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    { key: 'নাগরিকত্ব ও পরিচয়', defaultFee: 50 },
+                    { key: 'উত্তরাধিকার ও ওয়ারিশান', defaultFee: 100 },
+                    { key: 'চারিত্রিক ও প্রত্যয়ন', defaultFee: 50 },
+                    { key: 'সম্পত্তি ও ভূমি সংক্রান্ত', defaultFee: 100 },
+                    { key: 'বিবিধ ও অন্যান্য', defaultFee: 50 }
+                  ].map((cat) => (
+                    <div key={cat.key} className="bg-white p-2.5 rounded-lg border border-slate-200 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800">{cat.key}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-bold text-slate-500">৳</span>
+                        <input
+                          type="number"
+                          value={formData.categoryFees?.[cat.key] ?? cat.defaultFee}
+                          onChange={(e) => {
+                            const newFees = { ...(formData.categoryFees || {}), [cat.key]: parseInt(e.target.value) || 0 };
+                            setFormData({ ...formData, categoryFees: newFees });
+                          }}
+                          className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-xs font-extrabold text-emerald-900 text-right focus:bg-white focus:border-emerald-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  গোলাকার সিলের টেক্সট (Seal Text)
+                </label>
+                <input
+                  type="text"
+                  value={formData.sealText}
+                  onChange={(e) => setFormData({ ...formData, sealText: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-bold text-emerald-900"
+                />
+              </div>
+
+              <div className="md:col-span-2 pt-2 border-t border-slate-200">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.enableHeaderInPrint}
+                    onChange={(e) => setFormData({ ...formData, enableHeaderInPrint: e.target.checked })}
+                    className="w-4 h-4 rounded text-emerald-800 focus:ring-emerald-700 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-900">
+                    প্রিন্ট কপিতে সরকারি ডিজিটাল হেডার ডিফল্টভাবে দৃশ্যমান রাখুন
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: Google Workspace Integration */}
+        {activeTab === 'workspace' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <h3 className="font-bold text-sm text-emerald-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-700" />
+              <span>গুগল ডক্স টেমপ্লেট, ড্রাইভার ও শিট আইডি কনফিগারেশন</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Google Docs টেমপ্লেট আইডি (TEMPLATE_DOC_ID)
+                </label>
+                <input
+                  type="text"
+                  value={formData.templateDocId}
+                  onChange={(e) => setFormData({ ...formData, templateDocId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Google Drive সেভ ফোল্ডার আইডি (TARGET_FOLDER_ID)
+                </label>
+                <input
+                  type="text"
+                  value={formData.targetFolderId}
+                  onChange={(e) => setFormData({ ...formData, targetFolderId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Google Sheets ডাটাবেস আইডি (SHEET_ID)
+                </label>
+                <input
+                  type="text"
+                  value={formData.sheetId}
+                  onChange={(e) => setFormData({ ...formData, sheetId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Google Apps Script WebApp URL (exec)
+                </label>
+                <input
+                  type="text"
+                  value={formData.appsScriptUrl || ''}
+                  onChange={(e) => setFormData({ ...formData, appsScriptUrl: e.target.value })}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Google Sheets API Direct Export Launch Bar */}
+            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-800 text-amber-300 rounded-xl">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-emerald-950">
+                    Google Sheets API সরাসরি এক্সপোর্ট ও সিঙ্ক
+                  </h4>
+                  <p className="text-[11px] text-emerald-800">
+                    সকল নাগরিক অ্যাপ্লিকেশন রেজিস্টার ডাটা সরাসরি Google Sheets-এ এক্সপোর্ট ও লাইভ সিঙ্ক করুন।
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSheetsSyncOpen(true)}
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-2 cursor-pointer shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-amber-300" />
+                <span>Google Sheets সিঙ্ক উইজার্ড খুলুন</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: Cloudflare R2 / S3 Storage */}
+        {activeTab === 'r2' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="font-bold text-sm text-emerald-900 flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-emerald-700" />
+                <span>Cloudflare R2 / S3 অবজেক্ট স্টোরেজ শংসাপত্র</span>
+              </h3>
+              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                <span>সক্রিয় সংযোগ</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Cloudflare Account ID
+                </label>
+                <input
+                  type="text"
+                  value={formData.r2AccountId || '8145fd7882d729f182b85e7c18c1a5f0'}
+                  onChange={(e) => setFormData({ ...formData, r2AccountId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  R2 Access Key ID
+                </label>
+                <input
+                  type="text"
+                  value={formData.r2AccessKeyId || '26d4ea0bfd548258646061ba6d80d57d'}
+                  onChange={(e) => setFormData({ ...formData, r2AccessKeyId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  R2 Secret Access Key
+                </label>
+                <input
+                  type="password"
+                  value={formData.r2SecretAccessKey || 'b4c85f0e7c2937703376d89fb7d2a880cb2aa00631fcb8c32c8aa3d6612db94f'}
+                  onChange={(e) => setFormData({ ...formData, r2SecretAccessKey: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  S3 API Endpoint URL
+                </label>
+                <input
+                  type="text"
+                  value={formData.r2Endpoint || 'https://8145fd7882d729f182b85e7c18c1a5f0.r2.cloudflarestorage.com'}
+                  onChange={(e) => setFormData({ ...formData, r2Endpoint: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  R2 Storage Bucket Name
+                </label>
+                <input
+                  type="text"
+                  value={formData.r2BucketName || 'certificates-storage'}
+                  onChange={(e) => setFormData({ ...formData, r2BucketName: e.target.value })}
+                  placeholder="certificates-storage"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none font-bold"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: AI & Gemini System Prompts */}
+        {activeTab === 'ai' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <h3 className="font-bold text-sm text-emerald-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-700" />
+              <span>Gemini AI সিস্টেম প্রম্পট ও কাস্টম এপিআই কি</span>
+            </h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Gemini AI সিস্টেম প্রম্পট প্রেফিক্স (Zero-Fluff Rules)
+                </label>
+                <textarea
+                  rows={4}
+                  value={formData.defaultPromptPrefix}
+                  onChange={(e) => setFormData({ ...formData, defaultPromptPrefix: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  কাস্টম Gemini API Key (যদি নিজে পরিবর্তন করিতে চান)
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="password"
+                    placeholder="AQ.Ab8RN6Ki-YLREscKL..."
+                    value={formData.geminiApiKey || ''}
+                    onChange={(e) => setFormData({ ...formData, geminiApiKey: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  ফাঁকা রাখিলে সিস্টেমের ডিফল্ট এপিআই কী ব্যবহৃত হইবে।
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: Certificate Types Customizer */}
+        {activeTab === 'types' && (
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+              <div>
+                <h3 className="font-bold text-sm text-emerald-900 flex items-center gap-2">
+                  <Award className="w-4 h-4 text-emerald-700" />
+                  <span>৪০+ প্রাতিষ্ঠানিক প্রত্যয়নপত্রের ধরন ও প্রম্পট টিউনিং</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  যেকোনো সনদের এআই প্রম্পট নির্দেশনা বা তথ্য ক্ষেত্রগুলো পর্যবেক্ষণ করুন।
+                </p>
+              </div>
+
+              <input
+                type="text"
+                placeholder="সনদ খুঁজুন..."
+                value={certSearch}
+                onChange={(e) => setCertSearch(e.target.value)}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Type List Selector */}
+              <div className="max-h-80 overflow-y-auto space-y-1.5 border border-slate-200 p-2 rounded-xl bg-slate-50">
+                {CERTIFICATE_TYPES.filter(t => t.label.includes(certSearch) || t.category.includes(certSearch)).map(t => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCertKey(t.key);
+                      setEditingCertPrompt(t.promptInstruction || '');
+                    }}
+                    className={`w-full text-left p-2 rounded-lg text-xs font-bold transition flex items-center justify-between ${
+                      selectedCertKey === t.key
+                        ? 'bg-emerald-800 text-white shadow'
+                        : 'bg-white text-slate-800 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span>{t.label}</span>
+                    {selectedCertKey === t.key && <Check className="w-3.5 h-3.5 text-amber-300" />}
+                  </button>
+                ))}
+              </div>
+
+              {/* Type Details & Prompt Editor */}
+              <div className="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-xs text-emerald-950">{selectedCertType.label}</span>
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">
+                    {selectedCertType.category}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Gemini AI প্রম্পট গাইডলাইন (বাংলায়)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={editingCertPrompt || selectedCertType.promptInstruction || ''}
+                    onChange={(e) => setEditingCertPrompt(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+
+                {selectedCertType.simpleFields && selectedCertType.simpleFields.length > 0 && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      সংযুক্ত ডায়নামিক ফিল্ডসমূহ:
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedCertType.simpleFields.map(f => (
+                        <span key={f.key} className="px-2 py-1 bg-white border border-slate-300 text-slate-800 text-[10px] font-bold rounded">
+                          {f.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Save Status Notification */}
+        {saveSuccess && (
+          <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>কনফিগারেশন পরিবর্তন সফলভাবে সংরক্ষিত ও আপডেট করা হইয়াছে!</span>
+          </div>
+        )}
+
+        {/* Submit Actions */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="px-8 py-3 bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl shadow-lg transition flex items-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                <span>সেভ হইতেছে...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 text-amber-300" />
+                <span>মাস্টার কনফিগারেশন সেভ করুন</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+      )}
+
+      {/* TAB 9: API & Webhook Integration Section */}
+      {activeTab === 'api_webhook' && (
+        <div className="space-y-6">
+          {/* Top Header Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-6 rounded-2xl shadow-xl border border-slate-700/80 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full text-xs font-extrabold">
+                  <Radio className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                  <span>REST API & Webhook Realtime Dispatch System (v2.5.0)</span>
+                </div>
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  <span>API ও ওয়েবহুক (API & Webhook) তথ্য আদান-প্রদান ব্যবস্থাপনা</span>
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                  অন্যান্য প্রতিষ্ঠান, ব্যাঙ্ক, এনআইডি সার্ভিস, গুগল ড্রাইভ, অথবা মোবাইল অ্যাপ্লিকেশনের সাথে তথ্য শেয়ার করতে সিক্রেট API Key জেনারেট করুন এবং নতুন সনদ তৈরি/অনুমোদনের সাথে সাথে রিয়েল-টাইমে ওয়েবহুক নোটিফিকেশন পাঠান।
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/20 shrink-0 text-xs space-y-1.5">
+                <div className="flex items-center justify-between gap-4 text-slate-200">
+                  <span className="flex items-center gap-1.5"><Key className="w-3.5 h-3.5 text-amber-300" /> সক্রিয় API Keys:</span>
+                  <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                    {apiKeysList.filter(k => k.status === 'active').length} টি সক্রিয়
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-slate-200">
+                  <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-amber-300" /> ওয়েবহুক এন্ডপয়েন্ট:</span>
+                  <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                    {webhooksList.length} টি সংযুক্ত
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 1: API Key Management */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-100 text-emerald-900 rounded-xl">
+                  <Key className="w-5 h-5 text-emerald-800" />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-base">১. এপিআই অ্যাক্সেস কী (API Access Keys)</h4>
+                  <p className="text-xs text-slate-500">তৃতীয় পক্ষকে তথ্য শেয়ার করার জন্য নিরাপদ টোকেন জেনারেট করুন</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Form to generate new Key */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-6 space-y-1">
+                <label className="text-xs font-extrabold text-slate-700">API Key-এর নাম / ক্লায়েন্ট বর্ণনা:</label>
+                <input
+                  type="text"
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  placeholder="যেমন: সোনালী ব্যাংক যাচাইকরণ পোর্টাল / UDC Mobile App"
+                  className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="md:col-span-3 space-y-1">
+                <label className="text-xs font-extrabold text-slate-700">অনুমতি (Permissions):</label>
+                <select
+                  value={newKeyPerm}
+                  onChange={(e: any) => setNewKeyPerm(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  <option value="read">Read Only (শুধু তথ্য পড়া/যাচাই)</option>
+                  <option value="write">Read-Write (তথ্য ও আবেদন জমা)</option>
+                  <option value="admin">Full Admin (সম্পূর্ণ অ্যাক্সেস)</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-3">
+                <button
+                  type="button"
+                  onClick={handleGenerateApiKey}
+                  disabled={isGeneratingKey}
+                  className="w-full px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isGeneratingKey ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                  ) : (
+                    <Zap className="w-4 h-4 text-amber-300" />
+                  )}
+                  <span>নতুন API Key তৈরি করুন</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table of generated API Keys */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-100 text-slate-800 font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="p-3">কী-এর নাম / সার্ভিস</th>
+                    <th className="p-3">API Access Key</th>
+                    <th className="p-3">অনুমতি</th>
+                    <th className="p-3">তৈরির তারিখ</th>
+                    <th className="p-3">স্ট্যাটাস</th>
+                    <th className="p-3 text-right">অ্যাকশন</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {apiKeysList.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-4 text-slate-400">
+                        কোনো API Key পাওয়া যায় নাই। নতুন API Key তৈরি করুন।
+                      </td>
+                    </tr>
+                  ) : (
+                    apiKeysList.map((key) => (
+                      <tr key={key.id} className="hover:bg-slate-50/80 transition">
+                        <td className="p-3 font-bold text-slate-900">{key.name}</td>
+                        <td className="p-3 font-mono text-emerald-800 font-bold">
+                          <div className="flex items-center gap-2">
+                            <span>{key.key}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(key.key);
+                                setCopiedKeyId(key.id);
+                                setTimeout(() => setCopiedKeyId(null), 2000);
+                              }}
+                              className="p-1 hover:bg-slate-200 rounded text-slate-600 transition cursor-pointer"
+                              title="কপি করুন"
+                            >
+                              {copiedKeyId === key.id ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 text-[10px] rounded-md font-bold uppercase border ${
+                            key.permissions === 'admin' 
+                              ? 'bg-purple-100 text-purple-800 border-purple-200' 
+                              : key.permissions === 'write' 
+                              ? 'bg-blue-100 text-blue-800 border-blue-200' 
+                              : 'bg-slate-100 text-slate-800 border-slate-200'
+                          }`}>
+                            {key.permissions}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-500">
+                          {new Date(key.createdAt).toLocaleDateString('bn-BD')}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 text-[10px] rounded-md font-bold ${
+                            key.status === 'active'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-red-100 text-red-800 border border-red-200'
+                          }`}>
+                            {key.status === 'active' ? 'সক্রিয় (Active)' : 'বাতিল (Revoked)'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          {key.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeApiKey(key.id)}
+                              className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-[11px] rounded-lg border border-red-200 transition cursor-pointer"
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Section 2: Webhook Dispatcher System */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-100 text-amber-900 rounded-xl">
+                  <Radio className="w-5 h-5 text-amber-700 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-base">২. ওয়েবহুক নোটিফিকেশন সিস্টেম (Webhook Dispatcher)</h4>
+                  <p className="text-xs text-slate-500">সনদ তৈরি, অনুমোদন বা বাতিলের সাথে সাথে বাহ্যিক সার্ভার/গুগল শিটে রিয়েল-টাইম HTTP POST বার্তা পাঠান</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Form to add Webhook Endpoint */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                <div className="md:col-span-4 space-y-1">
+                  <label className="text-xs font-extrabold text-slate-700">Webhook নাম:</label>
+                  <input
+                    type="text"
+                    value={newWebhookName}
+                    onChange={(e) => setNewWebhookName(e.target.value)}
+                    placeholder="যেমন: Google Sheet Apps Script Webhook"
+                    className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="md:col-span-5 space-y-1">
+                  <label className="text-xs font-extrabold text-slate-700">Target Webhook Endpoint URL:</label>
+                  <input
+                    type="url"
+                    value={newWebhookUrl}
+                    onChange={(e) => setNewWebhookUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="md:col-span-3 space-y-1">
+                  <label className="text-xs font-extrabold text-slate-700">Secret Signature Key (Optional):</label>
+                  <input
+                    type="password"
+                    value={newWebhookSecret}
+                    onChange={(e) => setNewWebhookSecret(e.target.value)}
+                    placeholder="X-UP-Webhook-Secret"
+                    className="w-full px-3.5 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Event Subscriptions Checkboxes */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200/60">
+                <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-700">
+                  <span className="text-slate-500">ট্রিগার ইভেন্টসমূহ:</span>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newWebhookEvents.includes('certificate.created')}
+                      onChange={(e) => {
+                        if (e.target.checked) setNewWebhookEvents([...newWebhookEvents, 'certificate.created']);
+                        else setNewWebhookEvents(newWebhookEvents.filter(ev => ev !== 'certificate.created'));
+                      }}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>আবেদন জমা (certificate.created)</span>
+                  </label>
+
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newWebhookEvents.includes('certificate.approved')}
+                      onChange={(e) => {
+                        if (e.target.checked) setNewWebhookEvents([...newWebhookEvents, 'certificate.approved']);
+                        else setNewWebhookEvents(newWebhookEvents.filter(ev => ev !== 'certificate.approved'));
+                      }}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>চেয়ারম্যান অনুমোদন (certificate.approved)</span>
+                  </label>
+
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newWebhookEvents.includes('certificate.cancelled')}
+                      onChange={(e) => {
+                        if (e.target.checked) setNewWebhookEvents([...newWebhookEvents, 'certificate.cancelled']);
+                        else setNewWebhookEvents(newWebhookEvents.filter(ev => ev !== 'certificate.cancelled'));
+                      }}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>আবেদন বাতিল (certificate.cancelled)</span>
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleTestWebhookPing()}
+                    disabled={isTestingWebhook || !newWebhookUrl}
+                    className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 font-extrabold text-xs rounded-xl border border-amber-300 transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isTestingWebhook ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>টেস্ট পিং পাঠান (Test Ping)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleAddWebhook}
+                    disabled={isSavingWebhook || !newWebhookUrl}
+                    className="px-5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSavingWebhook ? <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" /> : <CheckCircle2 className="w-3.5 h-3.5 text-amber-300" />}
+                    <span>Webhook সেভ করুন</span>
+                  </button>
+                </div>
+              </div>
+
+              {webhookTestFeedback && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs font-bold text-amber-900 flex items-center justify-between">
+                  <span>{webhookTestFeedback}</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                </div>
+              )}
+            </div>
+
+            {/* Active Webhooks List & Delivery History Logs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Box A: Registered Webhooks */}
+              <div className="space-y-3">
+                <h5 className="font-extrabold text-xs text-slate-700 flex items-center justify-between">
+                  <span>নিবন্ধিত Webhook এন্ডপয়েন্টসমূহ:</span>
+                  <span className="text-slate-400 font-normal">({webhooksList.length} টি)</span>
+                </h5>
+
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                  {webhooksList.length === 0 ? (
+                    <div className="p-4 bg-slate-50 text-center rounded-xl text-xs text-slate-400 border border-slate-200">
+                      কোনো Webhook এন্ডপয়েন্ট নিবন্ধিত নাই। উপরে URL দিয়ে নতুন Webhook যুক্ত করুন।
+                    </div>
+                  ) : (
+                    webhooksList.map((wh) => (
+                      <div key={wh.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-black text-slate-900">{wh.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">
+                              {wh.enabled ? 'Active' : 'Disabled'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteWebhook(wh.id)}
+                              className="p-1 hover:bg-red-100 text-red-600 rounded transition cursor-pointer"
+                              title="মুছে ফেলুন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="font-mono text-[11px] text-slate-600 break-all bg-white p-1.5 rounded border border-slate-200">
+                          {wh.url}
+                        </p>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                          <span>ইভেন্টসমূহ: {wh.events.join(', ')}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleTestWebhookPing(wh.id, wh.url, wh.secret)}
+                            className="text-emerald-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" /> পিং দিন
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Box B: Realtime Webhook Delivery Logs */}
+              <div className="space-y-3">
+                <h5 className="font-extrabold text-xs text-slate-700 flex items-center justify-between">
+                  <span>ডেলিভারি হিস্ট্রি লগ (Delivery History):</span>
+                  <button onClick={fetchApiAndWebhookData} className="text-emerald-700 hover:underline flex items-center gap-1 text-[11px] font-bold">
+                    <RefreshCw className="w-3 h-3" /> রিফ্রেশ
+                  </button>
+                </h5>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {webhookLogsList.length === 0 ? (
+                    <div className="p-4 bg-slate-50 text-center rounded-xl text-xs text-slate-400 border border-slate-200">
+                      কোনো ওয়েবহুক ডেলিভারি লগ পাওয়া যায় নাই।
+                    </div>
+                  ) : (
+                    webhookLogsList.map((log) => (
+                      <div key={log.id} className="p-2.5 bg-slate-900 text-slate-200 rounded-xl text-[11px] font-mono space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
+                            log.status === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          }`}>
+                            HTTP {log.httpStatus || 'ERR'} {log.status.toUpperCase()}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(log.timestamp).toLocaleTimeString('bn-BD')}
+                          </span>
+                        </div>
+                        <p className="text-slate-300 truncate">{log.payloadSummary}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{log.url}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Interactive API Documentation & Code Playground */}
+          <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-xl border border-slate-800 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                  <Terminal className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="font-black text-white text-base">৩. ইন্টারঅ্যাক্টিভ API ডকুমেন্টেশন ও কোড স্নিপেট (API Code Integration)</h4>
+                  <p className="text-xs text-slate-300">যেকোনো ভাষায় সহজে ইন্টিগ্রেশনের জন্য রেডিমেড কোড উদাহরণ কাস্টমাইজ করে সরাসরি ব্যবহার করুন</p>
+                </div>
+              </div>
+
+              {/* Language Switcher Tabs */}
+              <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                {(['curl', 'fetch', 'gas', 'python'] as const).map((lang) => (
+                  <button
+                    key={lang}
+                    type="button"
+                    onClick={() => setSelectedCodeTab(lang)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      selectedCodeTab === lang
+                        ? 'bg-emerald-500 text-slate-950 font-black shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {lang === 'curl' && 'cURL'}
+                    {lang === 'fetch' && 'JS Fetch'}
+                    {lang === 'gas' && 'Apps Script'}
+                    {lang === 'python' && 'Python'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Code Display Canvas */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs space-y-3 relative overflow-x-auto">
+              <div className="flex items-center justify-between text-slate-400 text-[11px] border-b border-slate-800 pb-2">
+                <span>
+                  {selectedCodeTab === 'curl' && 'cURL Terminal Request Sample'}
+                  {selectedCodeTab === 'fetch' && 'JavaScript / Node.js Fetch Code'}
+                  {selectedCodeTab === 'gas' && 'Google Apps Script Integration (Gemini.gs / Code.gs)'}
+                  {selectedCodeTab === 'python' && 'Python Requests Integration'}
+                </span>
+                <span className="text-amber-400 font-bold">API Endpoint: /api/v1/certificates</span>
+              </div>
+
+              <pre className="text-emerald-300 whitespace-pre leading-relaxed font-mono">
+                {selectedCodeTab === 'curl' && `
+# 1. Query Certificate List by NID / Ward
+curl -X GET "${window.location.origin}/api/v1/certificates?wardNo=05" \\
+  -H "x-api-key: ${apiKeysList[0]?.key || 'up_live_7a8f9021b453e18c90'}"
+
+# 2. Public Certificate Instant Verification
+curl -X GET "${window.location.origin}/api/v1/certificates/verify/BUP-2026-1082"
+
+# 3. External Application Submission
+curl -X POST "${window.location.origin}/api/v1/certificates/apply" \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: ${apiKeysList[0]?.key || 'up_live_7a8f9021b453e18c90'}" \\
+  -d '{
+    "typeKey": "citizenship",
+    "name": "মোঃ জহিরুল ইসলাম",
+    "father": "হাজী আজগর আলী",
+    "mother": "আয়েশা খাতুন",
+    "gender": "পুরুষ",
+    "village": "বহেড়াতৈল",
+    "wardNo": "০৫",
+    "nid": "1994203918"
+  }'
+                `.trim()}
+
+                {selectedCodeTab === 'fetch' && `
+// JavaScript Fetch Example for External App Integration
+const API_KEY = "${apiKeysList[0]?.key || 'up_live_7a8f9021b453e18c90'}";
+const BASE_URL = "${window.location.origin}";
+
+async function verifyCertificate(memoNo) {
+  const response = await fetch(\`\${BASE_URL}/api/v1/certificates/verify/\${memoNo}\`);
+  const data = await response.json();
+  console.log("Certificate Valid:", data.isValid, data);
+  return data;
+}
+
+async function submitApplication(citizenData) {
+  const response = await fetch(\`\${BASE_URL}/api/v1/certificates/apply\`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY
+    },
+    body: JSON.stringify(citizenData)
+  });
+  return await response.json();
+}
+                `.trim()}
+
+                {selectedCodeTab === 'gas' && `
+// Google Apps Script (Code.gs) Integration Function
+function fetchUPCertificates() {
+  const apiKey = "${apiKeysList[0]?.key || 'up_live_7a8f9021b453e18c90'}";
+  const url = "${window.location.origin}/api/v1/certificates";
+  
+  const options = {
+    method: "get",
+    headers: { "x-api-key": apiKey },
+    muteHttpExceptions: true
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  const json = JSON.parse(response.getContentText());
+  Logger.log("Total Records: " + json.totalCount);
+  return json.data;
+}
+                `.trim()}
+
+                {selectedCodeTab === 'python' && `
+import requests
+
+API_KEY = "${apiKeysList[0]?.key || 'up_live_7a8f9021b453e18c90'}"
+BASE_URL = "${window.location.origin}"
+
+# Fetch Certificate List
+headers = {"x-api-key": API_KEY}
+res = requests.get(f"{BASE_URL}/api/v1/certificates?status=issued", headers=headers)
+print("Response JSON:", res.json())
+                `.trim()}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Apps Script Code Modal */}
+      <AppsScriptModal isOpen={isAppsScriptOpen} onClose={() => setIsAppsScriptOpen(false)} />
+
+      {/* Full Project Clone & Deployment Wizard Modal */}
+      {showCloneWizard && clonePackageData && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden space-y-0 animate-in fade-in duration-200">
+            {/* Modal Header */}
+            <div className="bg-emerald-950 text-white p-5 flex items-center justify-between border-b border-emerald-800">
+              <div className="flex items-center gap-2.5">
+                <RotateCcw className="w-6 h-6 text-amber-400" />
+                <div>
+                  <h3 className="font-extrabold text-base text-white">প্রজেক্ট রিস্টোর ও মাল্টি-ইউনিয়ন ক্লোনিং উইজার্ড</h3>
+                  <p className="text-xs text-emerald-200">ব্যাকআপ ফাইল থেকে নতুন ইউনিয়ন পরিষদ হিসেবে প্রজেক্টটি সক্রিয় করুন</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCloneWizard(false)}
+                className="p-1.5 hover:bg-emerald-900 text-slate-300 hover:text-white rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 text-xs text-slate-800">
+              {/* Option Mode Selector */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                <p className="font-bold text-slate-900">আপনি কোন মোডে ফাইলটি ইমপোর্ট বা রান করিতে চান?</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCloneMode('NEW_UNION_CLONE')}
+                    className={`p-3 rounded-xl border text-left font-bold transition flex items-center justify-between cursor-pointer ${
+                      cloneMode === 'NEW_UNION_CLONE'
+                        ? 'bg-emerald-800 text-white border-emerald-800 shadow-md'
+                        : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-xs font-black">১. নতুন ইউনিয়ন পরিষদ ক্লোনিং</p>
+                      <p className="text-[10px] opacity-80 font-normal">নতুন ইউপির নাম দিয়ে নতুন সিস্টেমে রূপান্তর</p>
+                    </div>
+                    {cloneMode === 'NEW_UNION_CLONE' && <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCloneMode('EXACT_RESTORE')}
+                    className={`p-3 rounded-xl border text-left font-bold transition flex items-center justify-between cursor-pointer ${
+                      cloneMode === 'EXACT_RESTORE'
+                        ? 'bg-emerald-800 text-white border-emerald-800 shadow-md'
+                        : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-xs font-black">২. হুবহু ডাটাবেস ও সিস্টেম রিস্টোর</p>
+                      <p className="text-[10px] opacity-80 font-normal">পুরাতন ইউপির ডাটাবেস সম্পূর্ণ উদ্ধার</p>
+                    </div>
+                    {cloneMode === 'EXACT_RESTORE' && <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Form Fields for NEW_UNION_CLONE Mode */}
+              {cloneMode === 'NEW_UNION_CLONE' ? (
+                <div className="bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 space-y-3">
+                  <p className="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4 text-emerald-700" />
+                    <span>নতুন ইউনিয়ন পরিষদের তথ্যসমূহ প্রদান করুন:</span>
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">নতুন ইউনিয়নের নাম:</label>
+                      <input
+                        type="text"
+                        value={cloneUnionName}
+                        onChange={(e) => setCloneUnionName(e.target.value)}
+                        placeholder="যেমন: ০১নং বাঘুটিয়া ইউনিয়ন পরিষদ"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-emerald-950 focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">উপজেলা:</label>
+                      <input
+                        type="text"
+                        value={cloneUpazila}
+                        onChange={(e) => setCloneUpazila(e.target.value)}
+                        placeholder="যেমন: সখিপুর"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">জেলা:</label>
+                      <input
+                        type="text"
+                        value={cloneDistrict}
+                        onChange={(e) => setCloneDistrict(e.target.value)}
+                        placeholder="যেমন: টাঙ্গাইল"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">চেয়ারম্যানের নাম:</label>
+                      <input
+                        type="text"
+                        value={cloneChairman}
+                        onChange={(e) => setCloneChairman(e.target.value)}
+                        placeholder="যেমন: মোঃ কামরুল ইসলাম"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">নতুন গুগল শিট আইডি (ঐচ্ছিক):</label>
+                      <input
+                        type="text"
+                        value={cloneSheetId}
+                        onChange={(e) => setCloneSheetId(e.target.value)}
+                        placeholder="Google Sheet ID"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">নতুন ড্রাইভ ফোল্ডার আইডি (ঐচ্ছিক):</label>
+                      <input
+                        type="text"
+                        value={cloneFolderId}
+                        onChange={(e) => setCloneFolderId(e.target.value)}
+                        placeholder="Google Drive Folder ID"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-amber-950 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>হুবহু রিস্টোর সতর্কবার্তা:</span>
+                  </p>
+                  <p className="text-[11px] leading-relaxed">
+                    এই মোডে ব্যাকআপ ফাইলে থাকা পূর্বের সকল নাগরিক তথ্য, সনদ এবং কনফিগারেশন পুনরায় ডাটাবেসে রিস্টোর হইবে।
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="bg-slate-100 p-4 border-t border-slate-200 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCloneWizard(false)}
+                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-bold rounded-xl border border-slate-300 transition cursor-pointer"
+              >
+                বাতিল করুন
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExecuteCloneImport}
+                disabled={isImportingClone}
+                className="px-6 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {isImportingClone ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                    <span>ক্লোনিং সক্রিয় হইতেছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    <span>ক্লোন রান ও প্রজেক্ট সেটআপ করুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* TAB 11: Multi-Admin & Firebase OAuth 2.0 Auth Management */}
+      {activeTab === 'multi_admin' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900 text-white p-6 rounded-2xl shadow-xl border border-emerald-800 relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full text-xs font-extrabold">
+                  <ShieldCheck className="w-4 h-4 text-amber-300" />
+                  <span>Google Firebase Authentication & OAuth 2.0 RBAC</span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  একাধিক এডমিন প্যানেল ও গুগল সাইন-ইন ব্যবস্থাপনা
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                  ইউনিয়ন পরিষদের চেয়ারম্যান, সচিব, ইউপি সদস্য ও আইটি সিস্টেম এডমিনগণের গুগল অ্যাকাউন্ট দ্বারা লগইন করার অনুমতি পরিচালনা করুন।
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 shrink-0 text-xs space-y-2">
+                <div className="flex items-center justify-between gap-4 text-emerald-100">
+                  <span className="font-bold">মোট অনুমোদিত এডমিন:</span>
+                  <span className="font-black text-amber-300 text-sm bg-emerald-950 px-2.5 py-0.5 rounded-full border border-amber-400/30">
+                    {adminsDirectory.length} জন
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-emerald-100">
+                  <span className="font-bold">অথেন্টিকেশন মেথড:</span>
+                  <span className="font-extrabold text-emerald-300">Google OAuth 2.0 (Pop-up)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Add New Admin User Form */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+              <User className="w-5 h-5 text-emerald-800" />
+              <h4 className="font-extrabold text-slate-900 text-base">
+                নতুন এডমিন যোগ করুন (Add New Admin Account)
+              </h4>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  গুগল ইমেইল এড্রেস *
+                </label>
+                <input
+                  type="email"
+                  value={newAdminEmail}
+                  onChange={(e) => setNewAdminEmail(e.target.value)}
+                  placeholder="admin@gmail.com"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  এডমিন নাম *
+                </label>
+                <input
+                  type="text"
+                  value={newAdminName}
+                  onChange={(e) => setNewAdminName(e.target.value)}
+                  placeholder="যেমন: মোঃ জহিরুল ইসলাম"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  পদবী ও দায়িত্ব
+                </label>
+                <input
+                  type="text"
+                  value={newAdminDesignation}
+                  onChange={(e) => setNewAdminDesignation(e.target.value)}
+                  placeholder="যেমন: ইউপি সচিব / চেয়ারম্যান / সিস্টেম এডমিন"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  পারমিশন রোল (Access Role)
+                </label>
+                <select
+                  value={newAdminRole}
+                  onChange={(e) => setNewAdminRole(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:border-emerald-600 focus:outline-none"
+                >
+                  <option value="super_admin">সুপার এডমিন (Super Admin)</option>
+                  <option value="chairman">চেয়ারম্যান (Chairman)</option>
+                  <option value="secretary">সচিব (Secretary)</option>
+                  <option value="member">ইউপি সদস্য / অফিসার (Member)</option>
+                  <option value="developer">আইটি ডেভেলপার (Developer)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleAddAdminUser}
+                disabled={isSavingAdminUser}
+                className="px-6 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-amber-300 font-extrabold text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isSavingAdminUser ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                    <span>সংরক্ষণ হইতেছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-amber-300" />
+                    <span>+ ফায়ারবেস এডমিন ডিরেক্টরিতে যোগ করুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Admin Directory Table / Cards */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-800" />
+                <h4 className="font-extrabold text-slate-900 text-base">
+                  সক্রিয় এডমিন তালিকা (Active Firebase Authorized Directory)
+                </h4>
+              </div>
+              <button
+                onClick={() => fetchAdminUsersFromFirebase().then(setAdminsDirectory)}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-300 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-800" />
+                <span>রিফ্রেশ</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {adminsDirectory.map((adm, idx) => (
+                <div 
+                  key={idx} 
+                  className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-start justify-between gap-3 hover:border-emerald-400 transition shadow-sm"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-800 text-amber-300 font-black flex items-center justify-center shrink-0 shadow-md text-base">
+                      {adm.name ? adm.name[0] : 'A'}
+                    </div>
+
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h5 className="font-black text-slate-900 text-sm truncate">
+                          {adm.name}
+                        </h5>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 bg-amber-100 text-emerald-950 border border-amber-300 rounded-md">
+                          {adm.role}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-600 font-medium truncate">
+                        {adm.email}
+                      </p>
+                      
+                      <p className="text-[11px] text-emerald-800 font-bold">
+                        পদবী: {adm.designation}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleDeleteAdminUser(adm.email)}
+                    className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition cursor-pointer shrink-0"
+                    title="এডমিন অনুমতি বাতিল করুন"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 12: Role & Permission Management Matrix (Real-time Firebase RBAC) */}
+      {activeTab === 'role_management' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900 text-white p-6 rounded-2xl shadow-xl border border-emerald-800 relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 border border-amber-400/30 rounded-full text-xs font-extrabold">
+                  <UserCog className="w-4 h-4 text-amber-300" />
+                  <span>Google Firebase Real-Time Role & Permission Management</span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  ডায়নামিক রোল ও পারমিশন কন্ট্রোল প্যানেল (Role Management)
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                  ইউনিয়ন পরিষদের চেয়ারম্যান, সচিব, ইউপি সদস্য (ওয়ার্ড ১-৯) ও কর্মকর্তাদের জন্য সুইচ-ভিত্তিক টেবিল ইন্টারফেসের মাধ্যমে রিয়েল-টাইমে ফায়ারবেস পারমিশন মেটাডাটা পরিচালনা করুন।
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 shrink-0 text-xs space-y-2">
+                <div className="flex items-center gap-2 text-emerald-300 font-extrabold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                  <span>Firebase Real-time Sync Active</span>
+                </div>
+                <p className="text-[11px] text-slate-300 font-medium">
+                  যেকোনো সুইচ পরিবর্তন মাত্রই ফায়ারবেস ডাটাবেসে আপডেট হয়।
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Toast Notification Alert */}
+          {roleStatusToast && (
+            <div className="bg-emerald-900 text-amber-300 p-4 rounded-xl border border-amber-400/50 shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top duration-300">
+              <div className="flex items-center gap-2 font-bold text-xs">
+                <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
+                <span>{roleStatusToast}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRoleStatusToast(null)}
+                className="text-amber-200 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Matrix Table View: Toggling Role Permissions (Switch-based Interface) */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div className="flex items-center gap-2.5">
+                <Sliders className="w-5 h-5 text-emerald-800" />
+                <div>
+                  <h4 className="font-black text-slate-900 text-base">
+                    পদবী অনুযায়ী পারমিশন ম্যাট্রিক্স (Role Permission Switch Matrix)
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    চেয়ারম্যান, সচিব ও ইউপি সদস্যদের গ্লোবাল পারমিশন সুইচ পরিবর্তন করুন
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  saveRolePermissionsMatrixToFirebase(roleMatrix);
+                  setRoleStatusToast('✓ রোল পারমিশন ম্যাট্রিক্স ফায়ারবেসে সিঙ্ক করা হইয়াছে।');
+                  setTimeout(() => setRoleStatusToast(null), 3000);
+                }}
+                className="px-4 py-2 bg-emerald-900 hover:bg-emerald-800 text-amber-300 text-xs font-extrabold rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-amber-300" />
+                <span>ফায়ারবেস সিঙ্ক স্টেট রিফ্রেশ</span>
+              </button>
+            </div>
+
+            {/* Switch-Based Permission Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900 text-white font-extrabold text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3.5 px-4">পদবী ও রোল (Council Role)</th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>ভিউ (View)</span>
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Edit3 className="w-3.5 h-3.5 text-amber-300" />
+                        <span>এডিট (Edit)</span>
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
+                        <span>অনুমোদন (Approve)</span>
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>ডিলিট (Delete)</span>
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <UserCog className="w-3.5 h-3.5 text-purple-400" />
+                        <span>এডমিন কন্ট্রোল</span>
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Download className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>ডাটা এক্সপোর্ট</span>
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white font-medium text-slate-800">
+                  {[
+                    { key: 'chairman', name: 'ইউপি চেয়ারম্যান (Chairman)', icon: '👑', badgeColor: 'bg-amber-100 text-amber-900 border-amber-300' },
+                    { key: 'secretary', name: 'প্রশাসনিক কর্মকর্তা / সচিব (Secretary)', icon: '📜', badgeColor: 'bg-emerald-100 text-emerald-950 border-emerald-300' },
+                    { key: 'member', name: 'ইউপি সদস্য (Member - Ward 1-9)', icon: '🏛️', badgeColor: 'bg-sky-100 text-sky-950 border-sky-300' },
+                    { key: 'super_admin', name: 'সুপার এডমিন (Super Admin)', icon: '🛡️', badgeColor: 'bg-purple-100 text-purple-950 border-purple-300' },
+                    { key: 'developer', name: 'আইটি ডেভেলপার (IT Developer)', icon: '💻', badgeColor: 'bg-slate-100 text-slate-900 border-slate-300' },
+                  ].map((role) => {
+                    const perms = roleMatrix[role.key] || {
+                      canView: true,
+                      canEdit: false,
+                      canApprove: false,
+                      canDelete: false,
+                      canApproveCertificates: false,
+                      canIssueCertificates: true,
+                      canManageAdmins: false,
+                      canEditConfig: false,
+                      canExportData: false,
+                      canDeleteLogs: false,
+                    };
+
+                    const renderSwitch = (permKey: keyof AdminPermissions, isEnabled: boolean) => (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isEnabled}
+                        onClick={() => handleToggleRolePermission(role.key, permKey)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          isEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                        }`}
+                        title={`${role.name} - ${permKey} toggle`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                            isEnabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    );
+
+                    return (
+                      <tr key={role.key} className="hover:bg-slate-50/80 transition">
+                        <td className="py-4 px-4 font-bold">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{role.icon}</span>
+                            <div>
+                              <p className="font-black text-slate-900 text-xs">{role.name}</p>
+                              <span className={`inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-full border mt-0.5 ${role.badgeColor}`}>
+                                Role: {role.key}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canView', !!(perms.canView ?? perms.canIssueCertificates))}
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canEdit', !!(perms.canEdit ?? perms.canEditConfig))}
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canApprove', !!(perms.canApprove ?? perms.canApproveCertificates))}
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canDelete', !!(perms.canDelete ?? perms.canDeleteLogs))}
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canManageAdmins', !!perms.canManageAdmins)}
+                          </div>
+                        </td>
+
+                        <td className="py-4 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            {renderSwitch('canExportData', !!perms.canExportData)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Individual Member/Admin Permissions Overrides */}
+          <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div className="flex items-center gap-2.5">
+                <Users className="w-5 h-5 text-emerald-800" />
+                <div>
+                  <h4 className="font-black text-slate-900 text-base">
+                    পরিষদ সদস্য ও এডমিনদের জন্য স্বতন্ত্র পারমিশন কন্ট্রোল (Individual Account Controls)
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    নির্দিষ্ট কোনো পরিষদ সদস্যের পারমিশন আলাদাভাবে সুইচ টগল করে ফায়ারবেসে রিয়েল-টাইমে আপডেট করুন
+                  </p>
+                </div>
+              </div>
+
+              {/* Search & Filter */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={roleSearchFilter}
+                    onChange={(e) => setRoleSearchFilter(e.target.value)}
+                    placeholder="নাম, ইমেইল বা ওয়ার্ড খুঁজুন..."
+                    className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:border-emerald-600 focus:outline-none w-48"
+                  />
+                </div>
+
+                <select
+                  value={roleFilterRole}
+                  onChange={(e) => setRoleFilterRole(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:border-emerald-600 focus:outline-none"
+                >
+                  <option value="all">সকল পদবী</option>
+                  <option value="chairman">চেয়ারম্যান</option>
+                  <option value="secretary">সচিব</option>
+                  <option value="member">ইউপি সদস্য</option>
+                  <option value="super_admin">সুপার এডমিন</option>
+                  <option value="developer">আইটি ডেভেলপার</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Individual Accounts List */}
+            <div className="space-y-3">
+              {adminsDirectory
+                .filter((adm) => {
+                  const matchSearch =
+                    adm.name.toLowerCase().includes(roleSearchFilter.toLowerCase()) ||
+                    adm.email.toLowerCase().includes(roleSearchFilter.toLowerCase()) ||
+                    adm.designation.toLowerCase().includes(roleSearchFilter.toLowerCase());
+                  const matchRole = roleFilterRole === 'all' || adm.role === roleFilterRole;
+                  return matchSearch && matchRole;
+                })
+                .map((user, idx) => {
+                  const uPerms = user.permissions || roleMatrix[user.role] || {
+                    canView: true,
+                    canEdit: false,
+                    canApprove: false,
+                    canDelete: false,
+                    canApproveCertificates: false,
+                    canIssueCertificates: true,
+                    canManageAdmins: false,
+                    canEditConfig: false,
+                    canExportData: false,
+                    canDeleteLogs: false,
+                  };
+
+                  const renderUserSwitch = (permKey: keyof AdminPermissions, labelText: string, isEnabled: boolean) => (
+                    <div className="flex items-center gap-1.5 bg-slate-100/80 px-2.5 py-1.5 rounded-lg border border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-700">{labelText}:</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isEnabled}
+                        onClick={() => handleToggleUserPermission(user.email, permKey)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          isEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                            isEnabled ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  );
+
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-emerald-400 transition"
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-900 text-amber-300 font-black flex items-center justify-center shrink-0 shadow text-base">
+                          {user.name ? user.name[0] : 'U'}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h5 className="font-extrabold text-slate-900 text-xs">{user.name}</h5>
+                            <span className="text-[10px] font-black px-2 py-0.5 bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-md">
+                              {user.role}
+                            </span>
+                            {user.wardNo && (
+                              <span className="text-[10px] font-extrabold px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-md">
+                                ওয়ার্ড নং {user.wardNo}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 font-medium">{user.email}</p>
+                          <p className="text-[11px] text-emerald-800 font-bold">{user.designation}</p>
+                        </div>
+                      </div>
+
+                      {/* Switched Permissions Toggles */}
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        {renderUserSwitch('canView', 'ভিউ', !!(uPerms.canView ?? uPerms.canIssueCertificates))}
+                        {renderUserSwitch('canEdit', 'এডিট', !!(uPerms.canEdit ?? uPerms.canEditConfig))}
+                        {renderUserSwitch('canApprove', 'অনুমোদন', !!(uPerms.canApprove ?? uPerms.canApproveCertificates))}
+                        {renderUserSwitch('canDelete', 'ডিলিট', !!(uPerms.canDelete ?? uPerms.canDeleteLogs))}
+
+                        <button
+                          type="button"
+                          onClick={() => handleResetUserToRoleDefaults(user)}
+                          className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-300 transition flex items-center gap-1 cursor-pointer"
+                          title="ডিফল্ট রোলে রিস্টোর করুন"
+                        >
+                          <RotateCcw className="w-3 h-3 text-slate-600" />
+                          <span>রিস্টোর</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template Manager & Google Doc Mapping Modal */}
+      <TemplateManager
+        isOpen={isTemplateManagerOpen}
+        onClose={() => setIsTemplateManagerOpen(false)}
+      />
+
+      {/* Firestore Cloud Backup Manager Modal */}
+      <BackupManager
+        isOpen={isBackupManagerOpen}
+        onClose={() => setIsBackupManagerOpen(false)}
+        onExportSuccess={() => fetchBackupsList()}
+      />
+
+      {/* Google Sheets Sync Modal */}
+      <GoogleSheetsSyncModal
+        isOpen={isSheetsSyncOpen}
+        onClose={() => setIsSheetsSyncOpen(false)}
+        logs={certsForSync}
+        config={config}
+      />
+    </div>
+  );
+};
