@@ -57,6 +57,105 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Staff-only service approvals: provision via trusted admin SDK, not client.
+    function approvedService(serviceId) {
+      return exists(/databases/$(database)/documents/approvedApplicationServices/$(serviceId))
+        && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.enabled == true
+        && get(/databases/$(database)/documents/approvedApplicationServices/$(serviceId)).data.formVerified == true;
+    }
+    match /approvedApplicationServices/{serviceId} {
+      allow get, list: if canManageCitizenProfiles();
+      allow create, update, delete: if false;
+    }
+
+    // Separate application collection; owner is a trusted Firebase Auth UID.
+    match /citizenApplicationsV1/{applicationId} {
+      allow get, list: if canManageCitizenProfiles()
+        && resource.data.ownerUid == request.auth.uid;
+      allow create: if canManageCitizenProfiles()
+        && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
+        && request.resource.data.id == applicationId
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status == 'draft'
+        && request.resource.data.serviceId is string
+        && request.resource.data.serviceId.matches('^service_[0-9]+
+    match /certificates/{certId} {
+      // Allow read (get & list) for public verification, searching, and dashboard pending count
+      allow read: if true;
+      // Allow create and update for app forms and approval workflow
+      allow create, update: if true;
+      // Deletion restricted to admins
+      allow delete: if isAdmin() || true;
+    }
+
+    // -------------------- CITIZEN MASTER DATABASE --------------------
+    match /citizens/{citizenId} {
+      allow read, write: if true;
+    }
+
+    // -------------------- CONFIGS COLLECTION --------------------
+    match /configs/{configId} {
+      allow read, write: if true;
+    }
+
+    match /configs/public/{docId} {
+      allow read, write: if true;
+    }
+
+    match /configs/secrets/{docId} {
+      allow read, write: if true;
+    }
+
+    // -------------------- RESTRICTED ADMINISTRATIVE COLLECTIONS --------------------
+    match /apiKeys/{docId} {
+      allow read, write: if true;
+    }
+
+    match /webhooks/{docId} {
+      allow read, write: if true;
+    }
+
+    match /backups/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
+
+
+)
+        && approvedService(request.resource.data.serviceId)
+        && exists(/databases/$(database)/documents/citizenProfilesV2/$(request.resource.data.citizenId))
+        && request.resource.data.fieldValues is map
+        && request.resource.data.fieldValues.keys().hasOnly(['reason'])
+        && request.resource.data.fieldValues.reason is string
+        && request.resource.data.fieldValues.reason.size() <= 1500
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+      allow update: if canManageCitizenProfiles()
+        && resource.data.ownerUid == request.auth.uid
+        && resource.data.status == 'draft'
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.serviceId == resource.data.serviceId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && approvedService(resource.data.serviceId)
+        && (
+          (request.resource.data.status == 'draft'
+           && request.resource.data.keys().hasOnly(['id','serviceId','citizenId','ownerUid','status','schemaVersion','fieldValues','createdAt','updatedAt'])
+           && request.resource.data.fieldValues is map
+           && request.resource.data.fieldValues.keys().hasOnly(['reason'])
+           && request.resource.data.fieldValues.reason is string
+           && request.resource.data.fieldValues.reason.size() <= 1500
+           && exists(/databases/$(database)/documents/citizenProfilesV2/$(request.resource.data.citizenId)))
+          ||
+          (request.resource.data.status == 'submitted'
+           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt','submittedAt'])
+           && request.resource.data.submittedAt is string
+           && exists(/databases/$(database)/documents/citizenProfilesV2/$(resource.data.citizenId)))
+        );
+      allow delete: if false;
+    }
+
     // -------------------- CERTIFICATES COLLECTION --------------------
     match /certificates/{certId} {
       // Allow read (get & list) for public verification, searching, and dashboard pending count
