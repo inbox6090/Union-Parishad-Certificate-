@@ -9,7 +9,8 @@ import {
   RefreshCw, 
   Calendar, 
   Building2,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Cloud
 } from 'lucide-react';
 import { fetchCertificatesFromFirebase } from '../firebase';
 import { CERTIFICATE_CATEGORIES, CERTIFICATE_TYPES } from '../data/certificateTypes';
@@ -17,6 +18,7 @@ import { WARDS } from '../data/villages';
 import { CertificateRecord, UnionParishadConfig } from '../types';
 import { CertificateView } from './CertificateView';
 import { GoogleSheetsSyncModal } from './GoogleSheetsSyncModal';
+import { CloudSecureBackupModal } from './CloudSecureBackupModal';
 
 interface CitizenLogsProps {
   config: UnionParishadConfig;
@@ -31,6 +33,7 @@ export const CitizenLogs: React.FC<CitizenLogsProps> = ({ config }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCert, setSelectedCert] = useState<CertificateRecord | null>(null);
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -136,10 +139,19 @@ export const CitizenLogs: React.FC<CitizenLogsProps> = ({ config }) => {
 
           <button
             onClick={handleExportCsv}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-2 cursor-pointer"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-2 cursor-pointer"
           >
             <Download className="w-4 h-4 text-amber-300" />
             <span>CSV এক্সপোর্ট</span>
+          </button>
+
+          <button
+            onClick={() => setIsBackupModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 hover:from-slate-800 hover:to-indigo-900 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-2 cursor-pointer border border-indigo-700/60"
+            title="সমগ্র সিটিজেন মাস্টার রেজিস্টার ও সনদপত্র লগ ক্লাউড ব্যাকআপ ও লোকাল JSON ডাউনলোড"
+          >
+            <Cloud className="w-4 h-4 text-amber-300" />
+            <span>ক্লাউড ব্যাকআপ ও JSON এক্সপোর্ট</span>
           </button>
         </div>
       </div>
@@ -272,6 +284,15 @@ export const CitizenLogs: React.FC<CitizenLogsProps> = ({ config }) => {
         onClose={() => setIsSheetsModalOpen(false)}
         logs={logs}
         config={config}
+      />
+
+      {/* Cloud-Based Backup & Secure Local JSON Export Modal */}
+      <CloudSecureBackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        config={config}
+        initialCertificates={logs}
+        onRestoreComplete={fetchLogs}
       />
     </div>
   );

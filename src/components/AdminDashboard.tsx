@@ -35,10 +35,12 @@ import {
   CheckSquare,
   Square,
   UserCog,
-  Zap
+  Zap,
+  Cloud
 } from 'lucide-react';
 import { UnionParishadConfig, AuditLogRecord, AdminUserRecord, CertificateRecord, AdminPermissions } from '../types';
 import { GoogleSheetsSyncModal } from './GoogleSheetsSyncModal';
+import { CloudSecureBackupModal } from './CloudSecureBackupModal';
 import { RbacQuickActions } from './RbacQuickActions';
 import { 
   auth, 
@@ -171,6 +173,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onNaviga
         .catch(err => console.warn('Error loading logs for dashboard Sheets sync:', err));
     }
   }, [isSheetsModalOpen]);
+
+  // Cloud Secure Backup Modal State
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
 
   // Manual Log Entry Modal State
   const [isAddLogOpen, setIsAddLogOpen] = useState(false);
@@ -587,13 +592,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onNaviga
           </div>
         </div>
 
-        <button
-          onClick={() => setIsSheetsModalOpen(true)}
-          className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-emerald-950 text-xs font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
-        >
-          <FileSpreadsheet className="w-4 h-4 text-emerald-950" />
-          <span>Google Sheets-এ সিঙ্ক করুন</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            onClick={() => setIsBackupModalOpen(true)}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-800 to-indigo-900 hover:from-emerald-700 hover:to-indigo-800 text-amber-300 border border-emerald-500/50 text-xs font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            title="ক্লাউড ব্যাকআপ ও নাগরিক মাস্টার রেজিস্টার এবং সনদ লগ সুরক্ষিত JSON এক্সপোর্ট"
+          >
+            <Cloud className="w-4 h-4 text-amber-300" />
+            <span>🔒 ক্লাউড ব্যাকআপ ও JSON</span>
+          </button>
+
+          <button
+            onClick={() => setIsSheetsModalOpen(true)}
+            className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-emerald-950 text-xs font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-950" />
+            <span>Google Sheets-এ সিঙ্ক করুন</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. Overview Stats Bar */}
@@ -1528,6 +1544,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onNaviga
         isOpen={isSheetsModalOpen}
         onClose={() => setIsSheetsModalOpen(false)}
         logs={dashboardLogs}
+        config={config}
+      />
+
+      {/* Cloud-based Secure JSON Backup & Citizen Register Exporter Modal */}
+      <CloudSecureBackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
         config={config}
       />
 

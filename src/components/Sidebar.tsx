@@ -23,7 +23,10 @@ import {
   Megaphone, 
   Activity, 
   Lock,
-  MessageSquare
+  MessageSquare,
+  Clock,
+  FileCheck,
+  CheckSquare
 } from 'lucide-react';
 import { UnionParishadConfig } from '../types';
 import { 
@@ -143,39 +146,74 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { 
       id: 'home', 
-      label: lang === 'bn' ? '১. ড্যাশবোর্ড' : '1. Dashboard', 
+      label: lang === 'bn' ? '১. প্রত্যয়ন সেবা পোর্টাল' : '1. Certificate Portal', 
       icon: Home,
+      badge: lang === 'bn' ? 'হোম' : 'Home'
+    },
+    { 
+      id: 'wizard', 
+      label: lang === 'bn' ? '২. সনদের জন্য নতুন আবেদন' : '2. Apply for Certificate', 
+      icon: FileCheck, 
+      badge: lang === 'bn' ? '৫-ধাপ' : '5-Step' 
+    },
+    { 
+      id: 'track', 
+      label: lang === 'bn' ? '৩. আবেদন ট্র্যাকিং' : '3. Track Application', 
+      icon: Clock, 
+      badge: lang === 'bn' ? 'লাইভ' : 'Live' 
+    },
+    { 
+      id: 'citizen_workspace', 
+      label: lang === 'bn' ? '৪. আমার নাগরিক ড্যাশবোর্ড' : '4. Citizen Workspace', 
+      icon: UserCheck, 
+      badge: lang === 'bn' ? 'প্রোফাইল' : 'Profile' 
+    },
+    { 
+      id: 'application_queue', 
+      label: lang === 'bn' ? '৫. আবেদন কিউ ও অনুমোদন' : '5. Application Queue', 
+      icon: CheckSquare, 
+      badge: lang === 'bn' ? 'যাচাই' : 'Verify' 
+    },
+    { 
+      id: 'faq', 
+      label: lang === 'bn' ? '৬. সচরাচর জিজ্ঞাসা (FAQ)' : '6. FAQ & Guidelines', 
+      icon: HelpCircle 
+    },
+    { 
+      id: 'dashboard', 
+      label: lang === 'bn' ? '৭. প্রশাসনিক ড্যাশবোর্ড' : '7. Admin Dashboard', 
+      icon: BarChart2,
       subItems: [
         { id: 'analytics', label: lang === 'bn' ? '📊 ৩০ দিনের ট্রেন্ড এনালাইটিক্স' : '📊 30-Day Trends Analytics', icon: BarChart2 }
       ]
     },
     { 
       id: 'pending', 
-      label: lang === 'bn' ? '২. চেয়ারম্যান অনুমোদন সমুহ' : '2. Chairman Approvals', 
+      label: lang === 'bn' ? '৮. চেয়ারম্যান অনুমোদন সমুহ' : '8. Chairman Approvals', 
       icon: ShieldCheck, 
       badge: pendingCount > 0 ? (lang === 'bn' ? `${pendingCount} টি` : `${pendingCount} Items`) : undefined,
       isPendingTab: true
     },
     { 
       id: 'citizens', 
-      label: lang === 'bn' ? '৩. নাগরিক একাউন্ট' : '3. Citizen Accounts', 
+      label: lang === 'bn' ? '৯. নাগরিক মাস্টার ডাটা' : '9. Citizen Master Data', 
       icon: UserCheck, 
       badge: lang === 'bn' ? 'ওয়ার্ড ফিল্টার' : 'Ward Filter' 
     },
     { 
       id: 'create', 
-      label: lang === 'bn' ? '৪. নতুন প্রত্যয়নপত্র আবেদন' : '4. New Certificate Application', 
+      label: lang === 'bn' ? '১০. সরাসরি প্রত্যয়ন জেনারেশন' : '10. Direct Certificate Gen', 
       icon: FileText, 
       badge: lang === 'bn' ? '৮০+ ধরন' : '80+ Formats' 
     },
     { 
       id: 'logs', 
-      label: lang === 'bn' ? '৫. সনদ পেজ ও রেকর্ড (সকল)' : '5. All Certificate Records', 
+      label: lang === 'bn' ? '১১. সনদ পেজ ও রেকর্ড (সকল)' : '11. All Certificate Records', 
       icon: FileText 
     },
     { 
       id: 'verify', 
-      label: lang === 'bn' ? '৬. সনদ অনলাইন যাচাই' : '6. Online Certificate Verify', 
+      label: lang === 'bn' ? '১২. সনদ অনলাইন যাচাই' : '12. Online Certificate Verify', 
       icon: ShieldCheck, 
       badge: lang === 'bn' ? 'QR স্ক্যান' : 'QR Scan' 
     },

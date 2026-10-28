@@ -255,6 +255,63 @@ export interface CitizenAccountRecord {
   registeredAt: string;
 }
 
+export type ApplicationStatus = 'draft' | 'submitted' | 'under_review' | 'needs_information' | 'approved' | 'rejected' | 'issued' | 'revoked';
+
+export interface ApplicationAttachment {
+  id: string;
+  name: string;
+  fileType: string;
+  sizeKb: number;
+  dataUrl?: string;
+  uploadedAt: string;
+  verified?: boolean;
+}
+
+export interface ApplicationAuditEntry {
+  status: ApplicationStatus;
+  note: string;
+  performedBy: string;
+  role?: string;
+  timestamp: string;
+}
+
+export interface CitizenApplicationRecord {
+  id: string; // e.g. APP-2026-BUP-0104
+  idempotencyKey: string;
+  citizenId: string;
+  serviceId: string;
+  serviceLabel: string;
+  serviceCategory: string;
+  schemaVersion: string;
+  applicantName: string;
+  applicantPhone: string;
+  applicantNid?: string;
+  applicantBirthNo?: string;
+  holdingNo?: string;
+  wardNo: string;
+  village: string;
+  fatherName: string;
+  motherName: string;
+  spouseName?: string;
+  gender: 'পুরুষ' | 'মহিলা' | 'হিজরা';
+  postOffice: string;
+  postCode?: string;
+  feeAmount: number;
+  paymentStatus: 'paid' | 'unpaid' | 'waived';
+  paymentMethod?: string;
+  trxId?: string;
+  fieldValues: Record<string, string>;
+  tableValues?: Record<string, string[][]>;
+  attachments: ApplicationAttachment[];
+  status: ApplicationStatus;
+  statusNote?: string;
+  rejectionReason?: string;
+  auditTrail: ApplicationAuditEntry[];
+  certificateId?: string; // Linked generated/issued certificate
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface NidScanResult {
   nidNo?: string;
   name?: string;
@@ -278,7 +335,7 @@ export interface VerificationResult {
 
 export interface AuditLogRecord {
   id: string;
-  action: 'CERTIFICATE_ISSUED' | 'CERTIFICATE_APPROVED' | 'CERTIFICATE_REJECTED' | 'ADMIN_ADDED' | 'ADMIN_REMOVED' | 'ADMIN_ROLE_UPDATED' | 'CONFIG_UPDATED' | 'TEMPLATE_CHANGED' | 'CITIZEN_RECORD_ADDED' | 'BACKUP_RESTORED' | 'SECURITY_KEY_GENERATED' | 'ADMIN_LOGIN' | 'OTHER';
+  action: 'CERTIFICATE_ISSUED' | 'CERTIFICATE_APPROVED' | 'CERTIFICATE_REJECTED' | 'ADMIN_ADDED' | 'ADMIN_REMOVED' | 'ADMIN_ROLE_UPDATED' | 'CONFIG_UPDATED' | 'TEMPLATE_CHANGED' | 'CITIZEN_RECORD_ADDED' | 'BACKUP_RESTORED' | 'CLOUD_BACKUP_EXPORTED' | 'SECURITY_KEY_GENERATED' | 'ADMIN_LOGIN' | 'OTHER';
   actionTitle: string;
   details: string;
   performedByEmail: string;
@@ -329,6 +386,42 @@ export interface BackupSnapshot {
   downloadUrl?: string;
   driveFileId?: string;
   notes?: string;
+  storagePath?: string | null;
+  source?: 'firebase_storage' | 'server_snapshot';
+  backupData?: any;
+}
+
+export interface CloudSecureBackupPayload {
+  packageType: 'UNION_PARISHAD_SECURE_CLOUD_BACKUP';
+  formatVersion: '3.0.0';
+  backupId: string;
+  timestamp: string;
+  meta: {
+    unionParishad: string;
+    upazila: string;
+    district: string;
+    exportedBy?: {
+      name: string;
+      email: string;
+      role?: string;
+    };
+    cloudBackupStatus: 'saved_to_cloud' | 'local_only' | 'verified';
+    firestoreBackupId?: string;
+    storageUrl?: string | null;
+    checksum: string;
+    softwareVersion: string;
+    securityNotes: string;
+  };
+  stats: {
+    totalCitizens: number;
+    totalCertificates: number;
+    wardsCount: Record<string, number>;
+    categoriesCount: Record<string, number>;
+    certificateStatuses: Record<string, number>;
+  };
+  citizenMasterRegister: CitizenAccountRecord[];
+  certificateLogs: CertificateRecord[];
+  configuration?: Partial<UnionParishadConfig>;
 }
 
 export interface GoogleChatSpace {

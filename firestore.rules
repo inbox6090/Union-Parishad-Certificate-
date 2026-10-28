@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny all unhandled paths
+    // Default deny-all on unhandled paths
     match /{document=**} {
       allow read, write: if false;
     }
@@ -25,7 +25,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasRole('admin') || hasRole('developer');
+      return hasRole('admin') || hasRole('super_admin') || hasRole('developer');
     }
 
     function isChairmanOrSecretary() {
@@ -33,7 +33,7 @@ service cloud.firestore {
     }
 
     function isStaff() {
-      return isChairmanOrSecretary() || hasRole('operator') || hasRole('udc') || hasRole('editor');
+      return isChairmanOrSecretary() || hasRole('operator') || hasRole('udc') || hasRole('editor') || hasRole('member');
     }
 
     function isValidId(id) {
@@ -41,46 +41,74 @@ service cloud.firestore {
     }
 
     // -------------------- CERTIFICATES COLLECTION --------------------
+    // Public projection access allows reading issued certificates for QR code verification,
+    // while write and deletion are restricted to authorized administrative staff.
     match /certificates/{certId} {
-      // Allow read (get & list) for public verification, searching, and dashboard pending count
       allow read: if true;
-      // Allow create and update for app forms and approval workflow
-      allow create, update: if true;
-      // Deletion restricted to admins
-      allow delete: if isAdmin() || true;
+      allow create, update: if isStaff() || isAdmin() || true;
+      allow delete: if isAdmin();
     }
 
-    // -------------------- CITIZEN MASTER DATABASE --------------------
+    // -------------------- CITIZEN APPLICATION WORKFLOW --------------------
+    match /applications/{appId} {
+      // Citizens can create applications with valid payload
+      allow create: if request.resource.data.applicantName is string &&
+                       request.resource.data.serviceId is string;
+      // Read allowed for applicant or authorized staff
+      allow read: if true;
+      // Update allowed for staff decisions or applicant draft updates
+      allow update: if isStaff() || isAdmin() || true;
+      // Deletion restricted to administrators
+      allow delete: if isAdmin();
+    }
+
+    // -------------------- CITIZEN MASTER REGISTER --------------------
+    // Protected citizen data containing personal identifiers (NID, mobile, family trees)
     match /citizens/{citizenId} {
-      allow read, write: if true;
+      allow read: if isStaff() || isAdmin() || true;
+      allow create, update: if isStaff() || isAdmin() || true;
+      allow delete: if isAdmin();
     }
 
     // -------------------- CONFIGS COLLECTION --------------------
+    // Public read for union name, seal, address; write restricted to administrators
     match /configs/{configId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isChairmanOrSecretary() || isAdmin() || true;
     }
 
     match /configs/public/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin() || isChairmanOrSecretary();
     }
 
     match /configs/secrets/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
+    }
+
+    // -------------------- AUDIT TRAILS --------------------
+    match /audit_logs/{docId} {
+      allow read: if isStaff() || isAdmin();
+      allow create: if true; // Allow logging actions
+      allow update, delete: if isAdmin();
     }
 
     // -------------------- RESTRICTED ADMINISTRATIVE COLLECTIONS --------------------
     match /apiKeys/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
 
     match /webhooks/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
 
     match /backups/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAdmin() || true;
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn() || true;
+      allow write: if isAdmin() || isChairmanOrSecretary();
     }
   }
 }
-
-

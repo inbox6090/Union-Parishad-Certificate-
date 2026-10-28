@@ -21,6 +21,12 @@ import { AiCitizenAssistant } from './components/AiCitizenAssistant';
 import { Dashboard } from './components/Dashboard';
 import { AdminGuard } from './components/AdminGuard';
 import { GoogleChatPortal } from './components/GoogleChatPortal';
+import { PublicProttoyonPortal } from './components/PublicProttoyonPortal';
+import { CertificateApplicationWizard } from './components/CertificateApplicationWizard';
+import { ApplicationStatusLookup } from './components/ApplicationStatusLookup';
+import { CitizenWorkspace } from './components/CitizenWorkspace';
+import { ApplicationQueue } from './components/ApplicationQueue';
+import { FAQAccordion } from './components/FAQAccordion';
 import { fetchConfigFromFirebase } from './firebase';
 import { CertificateRecord, UnionParishadConfig, CitizenAccountRecord } from './types';
 import { DEFAULT_UP_CONFIG } from './data/villages';
@@ -85,6 +91,7 @@ export default function App() {
   }, []);
 
   const [selectedCitizenForCert, setSelectedCitizenForCert] = useState<CitizenAccountRecord | null>(null);
+  const [selectedServiceForWizard, setSelectedServiceForWizard] = useState<string | undefined>(undefined);
 
   const handleCertificateGenerated = (cert: CertificateRecord) => {
     setGeneratedCert(cert);
@@ -141,6 +148,63 @@ export default function App() {
         {/* Main Body Canvas */}
         <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 my-2">
         {activeTab === 'home' && (
+          <PublicProttoyonPortal 
+            config={config} 
+            onStartApplication={(serviceKey) => {
+              setSelectedServiceForWizard(serviceKey);
+              setActiveTab('wizard');
+            }} 
+            onNavigateTab={handleNavigateTab}
+            onOpenCertificate={() => setActiveTab('verify')}
+          />
+        )}
+
+        {activeTab === 'wizard' && (
+          <CertificateApplicationWizard 
+            config={config}
+            initialServiceKey={selectedServiceForWizard}
+            initialCitizen={selectedCitizenForCert}
+            onApplicationComplete={() => {}}
+            onBackToPortal={() => setActiveTab('home')}
+            onTrackStatus={() => setActiveTab('track')}
+          />
+        )}
+
+        {activeTab === 'track' && (
+          <ApplicationStatusLookup 
+            config={config} 
+            onOpenCertificate={() => setActiveTab('verify')}
+            onStartNewApplication={() => {
+              setSelectedServiceForWizard(undefined);
+              setActiveTab('wizard');
+            }}
+          />
+        )}
+
+        {activeTab === 'citizen_workspace' && (
+          <CitizenWorkspace 
+            config={config} 
+            onTrackApplication={() => setActiveTab('track')}
+            onOpenCertificate={() => setActiveTab('verify')}
+          />
+        )}
+
+        {activeTab === 'application_queue' && (
+          <ApplicationQueue 
+            config={config} 
+            onCertificateIssued={(cert) => {
+              setGeneratedCert(cert);
+              setActiveTab('create');
+            }}
+            onOpenCertificate={() => setActiveTab('verify')}
+          />
+        )}
+
+        {activeTab === 'faq' && (
+          <FAQAccordion />
+        )}
+
+        {activeTab === 'portal_legacy' && (
           <HomePanel config={config} onNavigateTab={handleNavigateTab} />
         )}
 

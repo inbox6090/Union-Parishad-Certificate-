@@ -69,6 +69,7 @@ import { DEFAULT_COUNCIL_MEMBERS, getSyncedCouncilMembers } from '../data/counci
 import { AppsScriptModal } from './AppsScriptModal';
 import { TemplateManager } from './TemplateManager';
 import { BackupManager } from './BackupManager';
+import { CloudSecureBackupModal } from './CloudSecureBackupModal';
 import { PendingApprovals } from './PendingApprovals';
 import { GoogleSheetsSyncModal } from './GoogleSheetsSyncModal';
 import { FileSpreadsheet, QrCode } from 'lucide-react';
@@ -132,6 +133,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ config, onUpdateCo
   const [isAppsScriptOpen, setIsAppsScriptOpen] = useState(false);
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
   const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
+  const [isCloudSecureBackupOpen, setIsCloudSecureBackupOpen] = useState(false);
   const [isSheetsSyncOpen, setIsSheetsSyncOpen] = useState(false);
   const [certsForSync, setCertsForSync] = useState<CertificateRecord[]>([]);
 
@@ -2058,6 +2060,15 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ config, onUpdateCo
                 </div>
 
                 <div className="pt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsCloudSecureBackupOpen(true)}
+                    className="px-6 py-3 bg-gradient-to-r from-emerald-800 to-indigo-950 hover:from-emerald-700 hover:to-indigo-900 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95 border border-emerald-500/50"
+                  >
+                    <Cloud className="w-4 h-4 text-amber-300" />
+                    <span>🔒 নাগরিক ও সনদ রেজিস্টার ক্লাউড ব্যাকআপ (Secure JSON)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setIsBackupManagerOpen(true)}
@@ -4769,6 +4780,14 @@ print("Response JSON:", res.json())
         isOpen={isBackupManagerOpen}
         onClose={() => setIsBackupManagerOpen(false)}
         onExportSuccess={() => fetchBackupsList()}
+      />
+
+      {/* Cloud-based Secure JSON Backup & Citizen Register Exporter Modal */}
+      <CloudSecureBackupModal
+        isOpen={isCloudSecureBackupOpen}
+        onClose={() => setIsCloudSecureBackupOpen(false)}
+        config={formData}
+        onRestoreComplete={fetchBackupsList}
       />
 
       {/* Google Sheets Sync Modal */}

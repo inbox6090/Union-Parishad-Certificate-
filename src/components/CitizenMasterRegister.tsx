@@ -20,7 +20,9 @@ import {
   Hash,
   Home,
   CreditCard,
-  UserCheck
+  UserCheck,
+  Cloud,
+  Download
 } from 'lucide-react';
 import { WARDS, KNOWN_VILLAGES } from '../data/villages';
 import { CitizenAccountRecord, UnionParishadConfig, NidScanResult } from '../types';
@@ -29,6 +31,7 @@ import { validateNid, validateBirthNo, validatePhone } from '../utils/validation
 import { fetchCertificatesFromFirebase } from '../firebase';
 import { sheetsSyncService } from '../services/sheetsSyncService';
 import { NidScannerModal } from './NidScannerModal';
+import { CloudSecureBackupModal } from './CloudSecureBackupModal';
 
 interface CitizenMasterRegisterProps {
   config: UnionParishadConfig;
@@ -49,6 +52,7 @@ export const CitizenMasterRegister: React.FC<CitizenMasterRegisterProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isNidScannerOpen, setIsNidScannerOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
 
   // New Citizen Form State
   const [newCitizen, setNewCitizen] = useState<Partial<CitizenAccountRecord>>({
@@ -349,6 +353,15 @@ export const CitizenMasterRegister: React.FC<CitizenMasterRegisterProps> = ({
           >
             <Camera className="w-4 h-4 text-amber-400" />
             <span>Gemini Vision AI (NID)</span>
+          </button>
+
+          <button
+            onClick={() => setIsBackupModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-emerald-800 to-indigo-900 hover:from-emerald-700 hover:to-indigo-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer border border-emerald-600/40"
+            title="সমগ্র সিটিজেন মাস্টার রেজিস্টার ও সনদপত্র লগ ক্লাউড ব্যাকআপ ও লোকাল JSON ডাউনলোড"
+          >
+            <Cloud className="w-4 h-4 text-amber-300" />
+            <span>ক্লাউড ব্যাকআপ ও JSON এক্সপোর্ট</span>
           </button>
 
           <button
@@ -930,6 +943,15 @@ export const CitizenMasterRegister: React.FC<CitizenMasterRegisterProps> = ({
         isOpen={isNidScannerOpen}
         onClose={() => setIsNidScannerOpen(false)}
         onAutoFill={handleNidAutoFill}
+      />
+
+      {/* Cloud-Based Backup & Secure Local JSON Export Modal */}
+      <CloudSecureBackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        config={config}
+        initialCitizens={citizens}
+        onRestoreComplete={loadCitizens}
       />
     </div>
   );
