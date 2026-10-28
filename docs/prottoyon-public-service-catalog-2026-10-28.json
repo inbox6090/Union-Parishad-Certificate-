@@ -1,0 +1,1055 @@
+{
+  "version": "2026-10-28",
+  "source_urls": [
+    "https://prottoyon.gov.bd/union/covered",
+    "https://prottoyon.gov.bd/register/union",
+    "https://www.prottoyon.gov.bd/register/citizen",
+    "https://www.prottoyon.gov.bd/frontend/user_manual.pdf"
+  ],
+  "caution": "Service names verified from public pages; individual authenticated application field requirements NOT verified. Never represent proposed fields as official requirements.",
+  "citizen_profile": {
+    "identity": [
+      "nameBn",
+      "nameEn",
+      "dateOfBirth",
+      "nid",
+      "birthRegistrationNumber",
+      "mobile",
+      "email",
+      "gender",
+      "fatherName",
+      "motherName",
+      "photo"
+    ],
+    "currentAddress": [
+      "division",
+      "district",
+      "upazila",
+      "union",
+      "ward",
+      "village",
+      "postOffice",
+      "addressLine"
+    ],
+    "permanentAddress": [
+      "sameAsCurrent",
+      "division",
+      "district",
+      "upazila",
+      "union",
+      "ward",
+      "village",
+      "postOffice",
+      "addressLine"
+    ],
+    "education": [
+      "institution",
+      "degree",
+      "year"
+    ],
+    "employment": [
+      "employer",
+      "role",
+      "startDate",
+      "endDate"
+    ],
+    "family": [
+      "relation",
+      "name",
+      "identityReference"
+    ],
+    "emergencyContact": [
+      "name",
+      "relationship",
+      "mobile"
+    ],
+    "attachments": [
+      "photo",
+      "identityDocument"
+    ],
+    "verification_status": "mixed_publicly_documented_and_proposed; validate field-by-field"
+  },
+  "application_schema": {
+    "id": "uuid",
+    "citizenId": "uuid",
+    "serviceId": "service_XX",
+    "status": [
+      "draft",
+      "submitted",
+      "under_review",
+      "needs_information",
+      "approved",
+      "rejected",
+      "issued"
+    ],
+    "fieldValues": "object",
+    "attachments": "array",
+    "createdAt": "ISO date",
+    "updatedAt": "ISO date",
+    "auditTrail": "array",
+    "issuerApproval": "authorized_user_only",
+    "schemaVersion": "string"
+  },
+  "services": [
+    {
+      "id": "service_01",
+      "name_bn": "চারিত্রিক সনদ",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_02",
+      "name_bn": "অবিবাহিত সনদ",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_03",
+      "name_bn": "জাতীয়তা সনদ",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_04",
+      "name_bn": "বিবিধ সনদ",
+      "category": "other",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose",
+        "additionalDetails"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_05",
+      "name_bn": "উত্তরাধিকার সনদ",
+      "category": "inheritance",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "deceasedName",
+        "deceasedDeathDate",
+        "heirs"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_06",
+      "name_bn": "পুনঃবিবাহ সনদ",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_07",
+      "name_bn": "বার্ষিক আয়ের সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_08",
+      "name_bn": "মৃত্যু প্রত্যয়ন",
+      "category": "inheritance",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "deceasedName",
+        "deceasedDeathDate",
+        "heirs"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_09",
+      "name_bn": "মাসিক আয়ের সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_10",
+      "name_bn": "বেকারত্ব সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_11",
+      "name_bn": "স্থায়ী বাসিন্দা সনদ",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_12",
+      "name_bn": "ভূমিহীন সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_13",
+      "name_bn": "বিবাহিত প্রত্যয়ন",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_14",
+      "name_bn": "এতিম সনদ",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_15",
+      "name_bn": "উপজাতি সনদ",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_16",
+      "name_bn": "মুক্তিযোদ্ধা প্রত্যয়ন",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_17",
+      "name_bn": "একই ব্যক্তির প্রত্যয়ন",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_18",
+      "name_bn": "নতুন ভোটার প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_19",
+      "name_bn": "নাগরিকত্ব সনদ",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_20",
+      "name_bn": "পুনঃবিবাহ না হওয়ার প্রত্যয়ন",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_21",
+      "name_bn": "প্রতিবন্ধী সনদ",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_22",
+      "name_bn": "ভোটার এলাকা স্থানান্তর প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_23",
+      "name_bn": "অনাপত্তি সনদ",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_24",
+      "name_bn": "আর্থিক অস্বচ্ছলতার সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_25",
+      "name_bn": "নিঃসন্তান প্রত্যয়ন",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_26",
+      "name_bn": "সম্প্রদায় সনদ",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_27",
+      "name_bn": "জাতীয় পরিচয় তথ্য সংশোধন প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_28",
+      "name_bn": "অভিভাবক সম্মতি সনদ",
+      "category": "special",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "supportingEvidence",
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_29",
+      "name_bn": "ট্রেড লাইসেন্স",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_30",
+      "name_bn": "ওয়ারিশ সনদ",
+      "category": "inheritance",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "deceasedName",
+        "deceasedDeathDate",
+        "heirs"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_31",
+      "name_bn": "পারিবারিক সনদ",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_32",
+      "name_bn": "প্রিমিসেস লাইসেন্স",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_33",
+      "name_bn": "বিধবা প্রত্যয়ন",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_34",
+      "name_bn": "কৃষি প্রত্যয়ন",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_35",
+      "name_bn": "হোল্ডিং ট্যাক্স",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_36",
+      "name_bn": "ক্ষমতা অর্পণ প্রত্যয়ন",
+      "category": "inheritance",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "deceasedName",
+        "deceasedDeathDate",
+        "heirs"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_37",
+      "name_bn": "রোহিঙ্গা নয় প্রত্যয়ন",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_38",
+      "name_bn": "জীবিত ব্যক্তির প্রত্যয়ন",
+      "category": "identity",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "purpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_39",
+      "name_bn": "পাসপোর্ট প্রদানের প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_40",
+      "name_bn": "ভোটার তথ্য যাচাই-বাছাই প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_41",
+      "name_bn": "ভোটার তালিকা বাদ পড়ায় অন্তর্ভুক্তির প্রত্যয়ন",
+      "category": "voter",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "voterArea",
+        "nidCorrectionReason"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_42",
+      "name_bn": "পেশাগত সনদ",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_43",
+      "name_bn": "নতুন বিদ্যুৎ সংযোগের প্রত্যয়ন",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_44",
+      "name_bn": "আর্থিক স্বচ্ছলতার সনদ",
+      "category": "income",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "incomeAmount",
+        "incomePeriod",
+        "occupation"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_45",
+      "name_bn": "যৌতুক বিহীন বিবাহ প্রত্যয়ন",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_46",
+      "name_bn": "অবিবাহিত অবস্থায় মৃত্যু সনদ",
+      "category": "family",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "maritalStatus",
+        "spouseName",
+        "marriageDate"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    },
+    {
+      "id": "service_47",
+      "name_bn": "যানবাহন লাইসেন্স",
+      "category": "business",
+      "source_status": "verified_service_name",
+      "form_status": "proposed_not_verified",
+      "profile_refs": [
+        "identity",
+        "currentAddress",
+        "permanentAddress"
+      ],
+      "extra_fields_proposed": [
+        "businessName",
+        "businessAddress",
+        "licensePurpose"
+      ],
+      "attachments_proposed": [
+        "supportingDocument"
+      ],
+      "enabled": false
+    }
+  ]
+}
