@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
-import { HomePanel } from './components/HomePanel';
+import { ServicePortal } from './features/servicePortal/ServicePortal';
 import { CertificateForm } from './components/CertificateForm';
 import { CertificateView } from './components/CertificateView';
 import { VerificationPortal } from './components/VerificationPortal';
@@ -141,7 +141,7 @@ export default function App() {
         {/* Main Body Canvas */}
         <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 my-2">
         {activeTab === 'home' && (
-          <HomePanel config={config} onNavigateTab={handleNavigateTab} />
+          <ServicePortal config={config} onNavigateTab={handleNavigateTab} />
         )}
 
         {activeTab === 'dashboard' && (
