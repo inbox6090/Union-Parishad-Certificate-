@@ -9,7 +9,7 @@ import { CitizenLogs } from './components/CitizenLogs';
 import { AdminSettings } from './components/AdminSettings';
 import { AdminDashboard } from './components/AdminDashboard';
 import { ActivityAuditTrail } from './components/ActivityAuditTrail';
-import { CitizenMasterRegister } from './components/CitizenMasterRegister';
+import { CitizenMasterPanel } from './features/citizenMaster/CitizenMasterPanel';
 import { DeveloperProfile } from './components/DeveloperProfile';
 import { DevelopmentHeatmap } from './components/DevelopmentHeatmap';
 import { PendingApprovals } from './components/PendingApprovals';
@@ -222,7 +222,7 @@ export default function App() {
         )}
 
         {activeTab === 'citizens' && (
-          <CitizenMasterRegister config={config} onApplyForCitizen={handleApplyForCitizen} />
+          <CitizenMasterPanel onApplyForCitizen={handleApplyForCitizen} />
         )}
 
         {activeTab === 'members' && (
