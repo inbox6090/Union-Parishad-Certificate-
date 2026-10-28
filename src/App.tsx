@@ -4,7 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { ServicePortal } from './features/servicePortal/ServicePortal';
 import { CertificateForm } from './components/CertificateForm';
 import { CertificateView } from './components/CertificateView';
-import { VerificationPortal } from './components/VerificationPortal';
+import { PublicQrVerification } from './features/verification/PublicQrVerification';
 import { CitizenLogs } from './components/CitizenLogs';
 import { AdminSettings } from './components/AdminSettings';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -214,7 +214,7 @@ export default function App() {
         )}
 
         {activeTab === 'verify' && (
-          <VerificationPortal config={config} />
+          <PublicQrVerification />
         )}
 
         {activeTab === 'logs' && (
