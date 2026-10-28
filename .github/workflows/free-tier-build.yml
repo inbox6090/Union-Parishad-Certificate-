@@ -1,0 +1,30 @@
+name: Free-tier static build checks
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'functions/**'
+      - 'scripts/**'
+      - 'firestore.rules'
+      - 'package.json'
+      - 'vite.config.ts'
+      - '.github/workflows/free-tier-build.yml'
+  workflow_dispatch:
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run test:pages
+      - run: npm run lint
+      - run: npm run build:pages
+      - name: Confirm API fails closed
+        run: grep -q '503' 'functions/api/[[path]].ts'
+# No deploy step: production changes require explicit user approval.
