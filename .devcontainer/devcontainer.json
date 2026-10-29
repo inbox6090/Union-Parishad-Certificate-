@@ -1,0 +1,21 @@
+{
+  "name": "Union Parishad - low RAM cloud development",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "postCreateCommand": "printf 'Codespace ready. Dependencies are NOT installed automatically. See docs/hybrid-ai-terminal.md\\n'",
+  "forwardPorts": [],
+  "portsAttributes": {
+    "*": {
+      "onAutoForward": "ignore"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "files.watcherExclude": {
+          "**/node_modules/**": true,
+          "**/dist/**": true
+        }
+      }
+    }
+  }
+}

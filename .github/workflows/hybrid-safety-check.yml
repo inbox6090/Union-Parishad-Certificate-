@@ -1,0 +1,62 @@
+name: Hybrid cloud safety check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.devcontainer/**'
+      - '.github/workflows/hybrid-safety-check.yml'
+      - 'docs/hybrid-ai-terminal.md'
+      - 'package.json'
+      - '.gitignore'
+      - 'firestore.rules'
+  schedule:
+    - cron: '37 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hybrid-safety-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  safe-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout without credentials persistence
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate basic project and devcontainer JSON
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          for (const file of ['package.json', 'tsconfig.json', '.devcontainer/devcontainer.json']) {
+            JSON.parse(fs.readFileSync(file, 'utf8'));
+            console.log(file + ': valid JSON');
+          }
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          if (!pkg.scripts || typeof pkg.scripts.build !== 'string') {
+            throw new Error('Required build script is missing');
+          }
+          NODE
+      - name: Reject committed dotenv files (except sample)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tracked="$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v -E '(^|/)\.env\.example$' || true)"
+          if [ -n "$tracked" ]; then
+            echo '::error::Potential secret dotenv file is tracked.'
+            exit 1
+          fi
+          echo 'No real .env files tracked.'
+      - name: Warn about risky Firestore rule patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eq 'allow[^;]*if[[:space:]]+true|\|\|[[:space:]]*true' firestore.rules; then
+            echo '::warning file=firestore.rules::Potentially public access rules exist. Review with emulator tests before any deployment.'
+          fi
+          echo 'Safety checks completed. No build, deploy, secrets, or API calls were executed.'
