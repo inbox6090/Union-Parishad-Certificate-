@@ -21,16 +21,16 @@ gh codespace list
 
 Authorize in the browser yourself. Never paste tokens, passwords or OTPs in chat.
 
-Create Codespace on an isolated development branch (you can also open GitHub → repo → **Code → Codespaces**):
+Create Codespace from the setup PR branch (you can also open GitHub → select the branch → **Code → Codespaces**):
 
 ```sh
-gh codespace create -r inbox6090/Union-Parishad-Certificate- -b main --idle-timeout 5m
+gh codespace create -R inbox6090/Union-Parishad-Certificate- -b chore/hybrid-cloud-terminal-2026-10-30 --idle-timeout 5m
 gh codespace list
 gh codespace ssh
 gh codespace stop
 ```
 
-**Note:** Creation from `main` opens the current default branch; immediately create a new working branch in the remote terminal before editing (`git switch -c feature/my-task`). If the CLI cannot start a Codespace for your account, use GitHub's browser UI and check account access/quotas. Exiting an SSH session is not the same as stopping a Codespace.
+**Note:** This branch includes the proposed devcontainer before it is merged. Once the setup PR is reviewed and merged, future Codespaces can be created from `main`. For separate feature work, use a new branch (`git switch -c feature/my-task`). If the CLI cannot start a Codespace for your account, use GitHub's browser UI and check account access/quotas. Exiting an SSH session is not the same as stopping a Codespace.
 
 ## In the remote Linux terminal (optional)
 
