@@ -35,7 +35,7 @@ jobs:
           const fs = require('node:fs');
           for (const file of ['package.json', 'tsconfig.json', '.devcontainer/devcontainer.json']) {
             JSON.parse(fs.readFileSync(file, 'utf8'));
-            console.log(`${file}: valid JSON`);
+            console.log(file + ': valid JSON');
           }
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           if (!pkg.scripts || typeof pkg.scripts.build !== 'string') {
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tracked="$(git ls-files | grep -E '(^|/)\\.env($|\\.)' | grep -v -E '(^|/)\\.env\\.example$' || true)"
+          tracked="$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v -E '(^|/)\.env\.example$' || true)"
           if [ -n "$tracked" ]; then
             echo '::error::Potential secret dotenv file is tracked.'
             exit 1
@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -Eq 'allow[^;]*if[[:space:]]+true|\\|\\|[[:space:]]*true' firestore.rules; then
+          if grep -Eq 'allow[^;]*if[[:space:]]+true|\|\|[[:space:]]*true' firestore.rules; then
             echo '::warning file=firestore.rules::Potentially public access rules exist. Review with emulator tests before any deployment.'
           fi
           echo 'Safety checks completed. No build, deploy, secrets, or API calls were executed.'
