@@ -34,6 +34,17 @@ export function createRequireAuth(verifyToken: TokenVerifier) {
 
 export const requireAuth = createRequireAuth(token => adminAuth.verifyIdToken(token, true));
 
+// Existing citizen submission remains publicly accessible for compatibility.
+// If a token is supplied it MUST be valid; only verified UID binds ownership.
+export async function optionalFirebaseAuth(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.headers.authorization) {
+    next();
+    return;
+  }
+  return requireAuth(req, res, next);
+}
+
+
 export function requireRole(...allowedRoles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
