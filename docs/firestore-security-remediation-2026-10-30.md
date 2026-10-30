@@ -42,7 +42,7 @@ The proposed `firestore.rules` uses:
 ```sh
 npm install --prefix security-tests --ignore-scripts --no-audit --no-fund --no-package-lock
 ./security-tests/node_modules/.bin/firebase emulators:exec --only firestore \
-  --project demo-baheratail-rules --config security-tests/firebase.json \
+  --project demo-baheratail-rules --config firebase.security-tests.json \
   "node --test security-tests/firestore.rules.test.mjs"
 ```
 
