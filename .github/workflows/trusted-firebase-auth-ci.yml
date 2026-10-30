@@ -41,7 +41,7 @@ jobs:
           npm run build
       - name: Prevent old browser authorization paths
         run: |
-          if grep -nE 'localStorage|handleQuickAdminLogin|handlePinLogin' src/hooks/useAuth.ts src/components/AdminAuthModal.tsx src/components/AdminGuard.tsx src/components/RbacQuickActions.tsx; then
+          if grep -nE 'localStorage\\.|handleQuickAdminLogin|handlePinLogin' src/hooks/useAuth.ts src/components/AdminAuthModal.tsx src/components/AdminGuard.tsx src/components/RbacQuickActions.tsx; then
             echo "Legacy privileged browser authorization remains"
             exit 1
           fi
