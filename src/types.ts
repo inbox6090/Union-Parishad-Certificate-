@@ -276,7 +276,9 @@ export interface ApplicationAuditEntry {
 }
 
 export interface CitizenApplicationRecord {
-  id: string; // e.g. APP-2026-BUP-0104
+  id: string;
+  /** Only trusted Firebase ID token verification may set this; legacy records may lack it. */
+  applicantUid?: string; // e.g. APP-2026-BUP-0104
   idempotencyKey: string;
   citizenId: string;
   serviceId: string;
