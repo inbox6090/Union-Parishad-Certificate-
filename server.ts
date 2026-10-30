@@ -459,6 +459,7 @@ async function startServer() {
   for (const prefix of [
     "/api/admin/backup",
     "/api/admin/backups",
+    "/api/admin/config",
     "/api/admin/restore",
     "/api/admin/backup-r2",
     "/api/admin/project-clone",
@@ -1405,7 +1406,7 @@ ${upConfig.defaultPromptPrefix}
 
   // Approve Certificate (One-click Chairman Action)
   app.post("/api/admin/approve-cert", (req, res) => {
-    const { id, approvedBy } = req.body;
+    const { id } = req.body;
     const certIndex = certificateStore.findIndex(c => c.id === id || c.memoNo === id);
 
     if (certIndex === -1) {
@@ -1413,7 +1414,7 @@ ${upConfig.defaultPromptPrefix}
     }
 
     const now = new Date();
-    const approvedByName = approvedBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const approvedByName = (req as AuthRequest).user!.uid;
 
     certificateStore[certIndex] = {
       ...certificateStore[certIndex],
@@ -1421,10 +1422,10 @@ ${upConfig.defaultPromptPrefix}
       approvedBy: approvedByName,
       approvedAt: now.toISOString(),
       issuedBy: approvedByName,
-      biometricVerified: req.body.biometricVerified ?? true,
-      biometricAuthType: req.body.biometricAuthType || "WebAuthn Passkey",
-      biometricTimestamp: req.body.biometricTimestamp || now.toISOString(),
-      verifiedByBiometrics: req.body.verifiedByBiometrics || approvedByName
+      biometricVerified: false, // No trusted biometric assertion verified here.
+      biometricAuthType: undefined,
+      biometricTimestamp: undefined,
+      verifiedByBiometrics: undefined
     };
 
     dispatchWebhooks('certificate.approved', certificateStore[certIndex]);
@@ -1439,7 +1440,7 @@ ${upConfig.defaultPromptPrefix}
 
   // Cancel Certificate (One-click Chairman Action)
   app.post("/api/admin/cancel-cert", (req, res) => {
-    const { id, cancelledBy, reason } = req.body;
+    const { id, reason } = req.body;
     const certIndex = certificateStore.findIndex(c => c.id === id || c.memoNo === id);
 
     if (certIndex === -1) {
@@ -1447,7 +1448,7 @@ ${upConfig.defaultPromptPrefix}
     }
 
     const now = new Date();
-    const cancelledByName = cancelledBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const cancelledByName = (req as AuthRequest).user!.uid;
 
     certificateStore[certIndex] = {
       ...certificateStore[certIndex],
@@ -1469,9 +1470,8 @@ ${upConfig.defaultPromptPrefix}
 
   // Batch Approve All Pending
   app.post("/api/admin/batch-approve", (req, res) => {
-    const { approvedBy } = req.body;
     const now = new Date();
-    const approvedByName = approvedBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const approvedByName = (req as AuthRequest).user!.uid;
     let count = 0;
 
     certificateStore.forEach((c, idx) => {
