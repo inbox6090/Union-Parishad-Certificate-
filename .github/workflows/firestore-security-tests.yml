@@ -1,0 +1,41 @@
+name: Firestore rules emulator security tests
+
+on:
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'security-tests/**'
+      - '.github/workflows/firestore-security-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firestore-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator-rules:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Java 21 for Firestore Emulator
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install isolated, pinned test tools (no lifecycle scripts)
+        run: npm install --prefix security-tests --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Run local-only Firestore Emulator tests
+        env:
+          CI: 'true'
+        run: ./security-tests/node_modules/.bin/firebase emulators:exec --only firestore --project demo-baheratail-rules --config security-tests/firebase.json "node --test security-tests/firestore.rules.test.mjs"
