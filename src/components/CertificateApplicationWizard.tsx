@@ -1,3 +1,4 @@
+import { auth } from '../firebase';
 import React, { useState, useEffect, useId } from 'react';
 import { 
   CheckCircle2, 
@@ -266,9 +267,13 @@ export const CertificateApplicationWizard: React.FC<CertificateApplicationWizard
 
     try {
       // 1. Submit to server API
+      const signedInToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
       const res = await fetch('/api/applications/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(signedInToken ? { Authorization: `Bearer ${signedInToken}` } : {})
+        },
         body: JSON.stringify(applicationRecord)
       });
 
