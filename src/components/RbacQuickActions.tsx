@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import { UnionParishadConfig, AdminUserRecord } from '../types';
 import { auth } from '../firebase';
+import { onIdTokenChanged } from 'firebase/auth';
+import { trustedAdminRecord } from '../lib/trustedStaffRole';
 
 interface RbacQuickActionsProps {
   config: UnionParishadConfig;
@@ -63,63 +65,26 @@ export const RbacQuickActions: React.FC<RbacQuickActionsProps> = ({
   const [selectedRole, setSelectedRole] = useState<RbacRole>('citizen');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Load session from localStorage or Firebase
-  const checkSession = () => {
-    const saved = localStorage.getItem('bup_active_admin_session');
-    if (saved) {
+  // Display only verified Firebase roles. The buttons below are navigation,
+  // NOT authorization. Privileged APIs independently verify tokens server-side.
+  useEffect(()=>{
+    let active=true;
+    let seq=0;
+    const unsubscribe=onIdTokenChanged(auth,async user=>{
+      const request=++seq;
+      if(!user){ if(active){setActiveAdmin(null);setSelectedRole('citizen');}return; }
       try {
-        const parsed = JSON.parse(saved);
-        setActiveAdmin(parsed);
-        if (parsed.role) {
-          if (parsed.role === 'member') {
-            setSelectedRole('udc');
-          } else {
-            setSelectedRole(parsed.role as RbacRole);
-          }
-        }
-      } catch (e) {
-        setActiveAdmin(null);
+        const token=await user.getIdTokenResult();
+        if(!active||seq!==request)return;
+        const admin=trustedAdminRecord(user,token.claims);
+        setActiveAdmin(admin);
+        setSelectedRole(admin ? (admin.role==='member'?'udc':admin.role as RbacRole) : 'citizen');
+      }catch{
+        if(active&&seq===request){setActiveAdmin(null);setSelectedRole('citizen');}
       }
-    } else if (auth.currentUser) {
-      const email = auth.currentUser.email?.toLowerCase() || '';
-      let role: RbacRole = 'secretary';
-      if (email === 'baheratailunion@gmail.com') role = 'developer';
-      
-      const adminObj: AdminUserRecord = {
-        email,
-        name: auth.currentUser.displayName || 'অফিসিয়াল ইউজার',
-        role: role === 'developer' ? 'developer' : 'secretary',
-        designation: role === 'developer' ? 'সিস্টেম ডেভেলপার' : 'ইউনিয়ন কর্মকর্তা',
-        addedAt: new Date().toISOString(),
-        status: 'active'
-      };
-      setActiveAdmin(adminObj);
-      setSelectedRole(role);
-    } else {
-      setActiveAdmin(null);
-      setSelectedRole('citizen');
-    }
-  };
-
-  useEffect(() => {
-    checkSession();
-
-    const handleAuthChange = (e: CustomEvent<AdminUserRecord | null>) => {
-      if (e.detail) {
-        setActiveAdmin(e.detail);
-        if (e.detail.role) {
-          setSelectedRole(e.detail.role as RbacRole);
-        }
-      } else {
-        checkSession();
-      }
-    };
-
-    window.addEventListener('adminAuthChanged' as any, handleAuthChange);
-    return () => {
-      window.removeEventListener('adminAuthChanged' as any, handleAuthChange);
-    };
-  }, []);
+    });
+    return ()=>{active=false;seq++;unsubscribe();};
+  },[]);
 
   // Defined Quick Actions per Role
   const roleActionsMap: Record<RbacRole, { title: string; subtitle: string; icon: React.ElementType; actions: QuickActionItem[] }> = {
@@ -473,38 +438,9 @@ export const RbacQuickActions: React.FC<RbacQuickActionsProps> = ({
             </div>
           </div>
 
-          {/* Role Switcher Filter Tabs */}
-          <div className="pt-2 border-t border-emerald-900/80">
-            <span className="text-[11px] font-bold text-amber-200/80 block mb-2">
-              রোল অনুযায়ী কুইক অ্যাকশন উইজেট ফিল্টার টেস্ট করুন:
-            </span>
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-              {[
-                { id: 'citizen', label: '👤 নাগরিক (Citizen)', roleName: 'citizen' },
-                { id: 'udc', label: '💻 ইউডিজি অপারেটর (UDC)', roleName: 'udc' },
-                { id: 'secretary', label: '📋 ইউপি সচিব (Secretary)', roleName: 'secretary' },
-                { id: 'chairman', label: '✒️ চেয়ারম্যান (Chairman)', roleName: 'chairman' },
-                { id: 'super_admin', label: '🔒 সুপার এডমিন (Super Admin)', roleName: 'super_admin' },
-                { id: 'developer', label: '🛠️ ডেভেলপার (Developer)', roleName: 'developer' }
-              ].map(r => {
-                const isActive = selectedRole === r.id;
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => setSelectedRole(r.id as RbacRole)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
-                      isActive
-                        ? 'bg-amber-400 text-emerald-950 shadow-lg scale-105'
-                        : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 border border-slate-800'
-                    }`}
-                  >
-                    <span>{r.label}</span>
-                    {isActive && <ChevronRight className="w-3.5 h-3.5 text-emerald-950" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <p className="mt-2 text-xs text-amber-200">
+            অ্যাকশন দেখানোর ভূমিকা: {selectedRole} (Firebase দ্বারা যাচাইকৃত)। এখানে ভূমিকা পরিবর্তন করা যায় না।
+          </p>
         </div>
       </div>
 
