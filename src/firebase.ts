@@ -795,13 +795,8 @@ export async function fetchAdminUsersFromFirebase(): Promise<AdminUserRecord[]> 
   try {
     const colRef = collection(db, ADMINS_COLLECTION);
     const snap = await getDocs(colRef);
-    if (snap.empty) {
-      for (const adm of DEFAULT_ADMINS_LIST) {
-        const docId = adm.email.replace(/[^a-zA-Z0-9]/g, '_');
-        await setDoc(doc(db, ADMINS_COLLECTION, docId), adm, { merge: true });
-      }
-      return DEFAULT_ADMINS_LIST;
-    }
+    // Never bootstrap privileged administrative records from client defaults.
+    if (snap.empty) return [];
     const list: AdminUserRecord[] = [];
     snap.forEach(docSnap => {
       list.push(docSnap.data() as AdminUserRecord);
@@ -809,7 +804,7 @@ export async function fetchAdminUsersFromFirebase(): Promise<AdminUserRecord[]> 
     return list;
   } catch (err) {
     console.warn('Notice fetching admin users from Firebase:', err);
-    return DEFAULT_ADMINS_LIST;
+    return [];
   }
 }
 
@@ -823,7 +818,7 @@ export function subscribeToAdminUsersFromFirebase(callback: (admins: AdminUserRe
   const colRef = collection(db, ADMINS_COLLECTION);
   return onSnapshot(colRef, (snap) => {
     if (snap.empty) {
-      callback(DEFAULT_ADMINS_LIST);
+      callback([]);
       return;
     }
     const list: AdminUserRecord[] = [];
@@ -879,11 +874,8 @@ export function formatFirebaseAuthError(err: any): string {
 }
 
 export async function signInWithGooglePopup(): Promise<FirebaseUser> {
-  const result = await signInWithPopup(auth, googleProvider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (credential?.accessToken) {
-    cachedGoogleAccessToken = credential.accessToken;
-  }
+  // Staff identity needs standard Google Sign-In only: no Drive, Chat or Sheets OAuth scopes.
+  const result = await signInWithPopup(auth, new GoogleAuthProvider());
   return result.user;
 }
 
