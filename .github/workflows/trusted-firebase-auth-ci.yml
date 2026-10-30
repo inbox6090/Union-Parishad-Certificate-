@@ -1,0 +1,47 @@
+name: Trusted Firebase staff login regression checks
+
+on:
+  pull_request:
+    paths:
+      - 'src/hooks/useAuth.ts'
+      - 'src/lib/trustedStaffRole.ts'
+      - 'src/components/AdminAuthModal.tsx'
+      - 'src/components/AdminGuard.tsx'
+      - 'src/components/RbacQuickActions.tsx'
+      - 'src/firebase.ts'
+      - 'tests/trusted-staff-claims.test.ts'
+      - '.github/workflows/trusted-firebase-auth-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-firebase-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-auth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test trusted role policy
+        run: node --import tsx --test tests/trusted-staff-claims.test.ts
+      - name: Typecheck and build
+        run: |
+          npm run lint
+          npm run build
+      - name: Prevent old browser authorization paths
+        run: |
+          if grep -nE 'localStorage|handleQuickAdminLogin|handlePinLogin' src/hooks/useAuth.ts src/components/AdminAuthModal.tsx src/components/AdminGuard.tsx src/components/RbacQuickActions.tsx; then
+            echo "Legacy privileged browser authorization remains"
+            exit 1
+          fi
