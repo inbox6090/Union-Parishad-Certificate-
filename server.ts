@@ -19,7 +19,8 @@ import {
   CitizenApplicationRecord,
   ApplicationStatus
 } from "./src/types.js";
-import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
+import { requireAuth, requireRole, AuthRequest } from './src/middleware/auth.ts';
+import { canReadApplication, canChangeStatus, canIssueCertificate, toPublicVerification } from './src/middleware/api-access.ts';
 import { getOrCreateUser, getAllUsers } from './src/db/users.ts';
 
 dotenv.config();
@@ -770,55 +771,26 @@ ${upConfig.defaultPromptPrefix}
     }
   });
 
-  // Helper to mask sensitive PII for public access
-  function maskSensitiveString(val?: string, keepStart = 3, keepEnd = 3): string {
-    if (!val || val.length <= 6) return val || "";
-    return val.slice(0, keepStart) + "*".repeat(Math.max(4, val.length - (keepStart + keepEnd))) + val.slice(-keepEnd);
-  }
-
-  // Public Safe Verification Projection
+  // Public verification returns only non-sensitive metadata.
   app.get("/api/certificate/verify/:certNo", (req, res) => {
     const certNo = req.params.certNo;
-    const cert = certificateStore.find(
-      c => c.memoNo.toLowerCase() === certNo.toLowerCase() || c.id === certNo
-    );
-
-    if (cert) {
-      const isPublic = req.query.admin !== 'true';
-      const projectedCert: CertificateRecord = isPublic ? {
-        ...cert,
-        citizen: {
-          ...cert.citizen,
-          nid: cert.citizen.nid ? maskSensitiveString(cert.citizen.nid, 4, 3) : undefined,
-          mobile: cert.citizen.mobile ? maskSensitiveString(cert.citizen.mobile, 3, 3) : undefined,
-          birthNo: cert.citizen.birthNo ? maskSensitiveString(cert.citizen.birthNo, 4, 3) : undefined,
-        }
-      } : cert;
-
-      res.json({
-        found: true,
-        certificate: projectedCert,
-        verifiedAt: new Date().toISOString(),
-        upConfig: {
-          upName: upConfig.upName,
-          address: upConfig.address,
-          chairmanName: upConfig.chairmanName,
-          secretaryName: upConfig.secretaryName,
-          sealText: upConfig.sealText
-        }
-      });
-    } else {
-      res.json({
-        found: false,
-        message: "উক্ত স্মারক বা সনদ নম্বরে কোনো বৈধ রেকর্ড পাওয়া যায় নাই।"
-      });
+    const cert = certificateStore.find(c => c.memoNo.toLowerCase() === certNo.toLowerCase() || c.id === certNo);
+    res.setHeader('Cache-Control', 'no-store');
+    if (!cert || !['issued','approved','revoked'].includes(cert.status)) {
+      return res.json({ found: false, message: "উক্ত স্মারক বা সনদ নম্বরে কোনো যাচাইযোগ্য রেকর্ড পাওয়া যায় নাই।" });
     }
+    return res.json({
+      found: true,
+      verification: toPublicVerification(cert),
+      verifiedAt: new Date().toISOString(),
+      unionParishad: upConfig.upName,
+    });
   });
 
   // -------------------- CITIZEN APPLICATION WORKFLOW APIS --------------------
 
   // 1. Get all applications (with status & ward filters)
-  app.get("/api/applications", (req, res) => {
+  app.get("/api/applications", requireAuth, requireRole("operator","udc","secretary","approver","chairman","admin","super_admin"), (req: AuthRequest, res) => {
     const { status, ward, citizenId } = req.query;
     let list = [...applicationStore];
 
@@ -840,11 +812,11 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // 2. Get single application details
-  app.get("/api/applications/:id", (req, res) => {
+  app.get("/api/applications/:id", requireAuth, (req: AuthRequest, res) => {
     const { id } = req.params;
     const appRecord = applicationStore.find(a => a.id.toLowerCase() === id.toLowerCase());
 
-    if (appRecord) {
+    if (appRecord && canReadApplication(req.user, appRecord as CitizenApplicationRecord & { applicantUid?: string })) {
       res.json({
         success: true,
         application: appRecord
@@ -921,9 +893,10 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // 4. Update Application Status (e.g. approve, request info, reject)
-  app.post("/api/applications/:id/status", (req, res) => {
+  app.post("/api/applications/:id/status", requireAuth, requireRole("operator","udc","secretary","approver","chairman","admin","super_admin"), (req: AuthRequest, res) => {
     const { id } = req.params;
-    const { status, note, performedBy } = req.body;
+    const { status, note } = req.body || {};
+    if (typeof status !== "string") return res.status(400).json({ error: "Invalid status" });
 
     const idx = applicationStore.findIndex(a => a.id.toLowerCase() === id.toLowerCase());
     if (idx === -1) {
@@ -932,8 +905,11 @@ ${upConfig.defaultPromptPrefix}
 
     const now = new Date().toISOString();
     const appRecord = applicationStore[idx];
+    if (!canChangeStatus(req.user, appRecord.status, status)) {
+      return res.status(403).json({ error: "Forbidden: Status transition not permitted" });
+    }
 
-    appRecord.status = status;
+    appRecord.status = status as ApplicationStatus;
     if (note) {
       appRecord.statusNote = note;
     }
@@ -941,7 +917,7 @@ ${upConfig.defaultPromptPrefix}
     appRecord.auditTrail.push({
       status,
       note: note || `স্ট্যাটাস পরিবর্তন: ${status}`,
-      performedBy: performedBy || upConfig.secretaryName || "প্রশাসনিক অফিসার",
+      performedBy: req.user!.uid,
       role: "ইউপি কর্তৃপক্ষ",
       timestamp: now
     });
@@ -953,13 +929,17 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // 5. Issue Official Certificate from Approved Application
-  app.post("/api/applications/:id/issue", async (req, res) => {
+  app.post("/api/applications/:id/issue", requireAuth, requireRole("secretary","approver","chairman","admin","super_admin"), async (req: AuthRequest, res) => {
     try {
       const { id } = req.params;
       const appRecord = applicationStore.find(a => a.id.toLowerCase() === id.toLowerCase());
 
       if (!appRecord) {
         return res.status(404).json({ error: "আবেদন পাওয়া যায় নাই।" });
+      }
+
+      if (!canIssueCertificate(req.user, appRecord)) {
+        return res.status(403).json({ error: "Forbidden: Approved application and approver role required" });
       }
 
       const now = new Date();
@@ -2673,39 +2653,15 @@ ${upConfig.defaultPromptPrefix}
     });
   });
 
-  // 2. GET /api/v1/certificates/verify/:memoNo (Public verification endpoint for banks/agencies)
+  // Public v1 verification: same non-sensitive allowlist.
   app.get("/api/v1/certificates/verify/:memoNo", (req, res) => {
     const { memoNo } = req.params;
     const cert = certificateStore.find(c => c.memoNo === memoNo || c.id === memoNo);
-
-    if (!cert) {
-      return res.status(404).json({
-        status: "not_found",
-        isValid: false,
-        message: "প্রদত্ত স্মারক/সনদ নম্বরের কোনো রেকর্ড ডাটাবেসে পাওয়া যায় নাই।"
-      });
+    res.setHeader('Cache-Control', 'no-store');
+    if (!cert || !['issued','approved','revoked'].includes(cert.status)) {
+      return res.status(404).json({ status: 'not_found', isValid: false });
     }
-
-    res.json({
-      status: "success",
-      isValid: cert.status === "issued" || cert.status === "approved",
-      memoNo: cert.memoNo,
-      typeLabel: cert.typeLabel,
-      issueDate: cert.issueDate,
-      citizen: {
-        name: cert.citizen.name,
-        father: cert.citizen.father,
-        mother: cert.citizen.mother,
-        nid: cert.citizen.nid,
-        village: cert.citizen.village,
-        wardNo: cert.citizen.wardNo,
-        postOffice: cert.citizen.postOffice
-      },
-      certStatus: cert.status,
-      issuedBy: cert.issuedBy,
-      unionParishad: upConfig.upName,
-      verificationUrl: cert.verificationUrl
-    });
+    return res.json({ status: 'success', ...toPublicVerification(cert) });
   });
 
   // 3. POST /api/v1/certificates/apply (External Application Submission API)
