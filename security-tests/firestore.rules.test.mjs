@@ -41,7 +41,7 @@ beforeEach(async () => {
       setDoc(ref(db, 'citizens/citizen-1'), { name: 'Private Citizen', nid: 'TEST-NID' }),
       setDoc(ref(db, 'applications/app-a'), application('citizen-a', 'draft')),
       setDoc(ref(db, 'applications/app-submitted'), application('citizen-a', 'submitted')),
-      setDoc(ref(db, 'public_verifications/BUP-2026-1001'), verification()),
+      setDoc(ref(db, 'public_verifications/0123456789abcdef0123456789abcdef0123456789abcdef'), verification()),
       setDoc(ref(db, 'configs/master_config'), { unionName: 'Test Union', internalSetting: 'secret' }),
       setDoc(ref(db, 'admins/admin-1'), { email: 'not-real@example.invalid', role: 'admin' }),
       setDoc(ref(db, 'backups/backup-1'), { encryptedBlob: 'TEST' }),
@@ -53,7 +53,7 @@ beforeEach(async () => {
 });
 
 test('anonymous can get a narrow published QR verification record', async () => {
-  const snap = await assertSucceeds(getDoc(ref(anon(), 'public_verifications/BUP-2026-1001')));
+  const snap = await assertSucceeds(getDoc(ref(anon(), 'public_verifications/0123456789abcdef0123456789abcdef0123456789abcdef')));
   if (!snap.exists() || snap.data().status !== 'issued') throw new Error('Missing public verification record');
 });
 test('anonymous cannot enumerate public verification records', async () => {
@@ -75,8 +75,8 @@ test('anonymous cannot write certificates, citizens, applications, configs or ba
 });
 test('anonymous cannot create public QR verification or modify issued record', async () => {
   const db = anon();
-  await assertFails(setDoc(ref(db, 'public_verifications/BUP-2026-2002'), verification('BUP-2026-2002')));
-  await assertFails(updateDoc(ref(db, 'public_verifications/BUP-2026-1001'), { status: 'revoked' }));
+  await assertFails(setDoc(ref(db, 'public_verifications/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), verification('BUP-2026-2002')));
+  await assertFails(updateDoc(ref(db, 'public_verifications/0123456789abcdef0123456789abcdef0123456789abcdef'), { status: 'revoked' }));
 });
 test('citizen reads own application and not another applicant application', async () => {
   const db = auth('citizen', 'citizen-a');
@@ -138,19 +138,19 @@ test('secretary and approver can process approvals and issue certificates', asyn
 });
 test('approver can publish only approved narrow verification fields, not citizen identifiers', async () => {
   const db = auth('approver');
-  await assertSucceeds(setDoc(ref(db,'public_verifications/BUP-2026-2002'), verification('BUP-2026-2002')));
-  await assertFails(setDoc(ref(db,'public_verifications/BUP-2026-2003'), {
+  await assertSucceeds(setDoc(ref(db,'public_verifications/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), verification('BUP-2026-2002')));
+  await assertFails(setDoc(ref(db,'public_verifications/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), {
     ...verification('BUP-2026-2003'), nid:'TEST-NID'
   }));
-  await assertFails(setDoc(ref(db,'public_verifications/BUP-2026-2004'), {
+  await assertFails(setDoc(ref(db,'public_verifications/cccccccccccccccccccccccccccccccccccccccccccccccc'), {
     ...verification('BUP-2026-2004'), citizen:{name:'Private'}
   }));
-  await assertFails(setDoc(ref(db,'public_verifications/BUP-2026-2005'), {
+  await assertFails(setDoc(ref(db,'public_verifications/dddddddddddddddddddddddddddddddddddddddddddddd'), {
     ...verification('BUP-2026-2005'), status:'draft'
   }));
 });
 test('public verification memo number is immutable on update', async () => {
-  await assertFails(updateDoc(ref(auth('approver'),'public_verifications/BUP-2026-1001'), {memoNo:'OTHER'}));
+  await assertFails(updateDoc(ref(auth('approver'),'public_verifications/0123456789abcdef0123456789abcdef0123456789abcdef'), {memoNo:'OTHER'}));
 });
 test('admin can manage backups and admins; operator cannot', async () => {
   const admin = auth('admin'), operator = auth('operator');
@@ -185,4 +185,10 @@ test('unrecognized role and mere login have no staff authority', async () => {
     await assertFails(getDoc(ref(db,'citizens/citizen-1')));
     await assertFails(getDoc(ref(db,'backups/backup-1')));
   }
+});
+
+test('predictable memo numbers cannot be used as public document IDs', async () => {
+  const db = auth('approver');
+  await assertFails(setDoc(ref(db, 'public_verifications/BUP-2026-PREDICTABLE'), verification('BUP-2026-PREDICTABLE')));
+  await assertFails(setDoc(ref(db, 'public_verifications/abc123'), verification('BUP-2026-SHORT')));
 });

@@ -59,13 +59,16 @@ service cloud.firestore {
       ]);
     }
     function validPublicVerification(certId) {
-      return request.resource.data.keys().hasAll([
+      // Trusted backend MUST create a random 24-byte hex token (not a memo number).
+      // A regex checks token shape, not its cryptographic randomness.
+      return certId is string &&
+        certId.matches('^[a-f0-9]{48}$') &&
+        request.resource.data.keys().hasAll([
         'memoNo', 'typeLabel', 'issueDate', 'issuedBy', 'status'
       ]) &&
       request.resource.data.keys().hasOnly([
         'memoNo', 'typeLabel', 'issueDate', 'issuedBy', 'status'
       ]) &&
-      request.resource.data.memoNo == certId &&
       request.resource.data.memoNo is string &&
       request.resource.data.memoNo.size() > 0 &&
       request.resource.data.memoNo.size() <= 128 &&
@@ -95,7 +98,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Public QR read is a DIFFERENT document containing only allowlisted fields.
+    // Public QR read is a DIFFERENT document keyed by a trusted random token.
     // Publish from a trusted issuance flow after human approval (not yet wired).
     match /public_verifications/{certId} {
       allow get: if true;
