@@ -10,6 +10,7 @@ on:
       - 'src/components/RbacQuickActions.tsx'
       - 'src/firebase.ts'
       - 'tests/trusted-staff-claims.test.ts'
+      - 'scripts/provision-staff-claims.mjs'
       - '.github/workflows/trusted-firebase-auth-ci.yml'
   workflow_dispatch:
 
@@ -35,6 +36,12 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Test trusted role policy
         run: node --import tsx --test tests/trusted-staff-claims.test.ts
+      - name: Exercise role provisioning in offline dry-run mode
+        env:
+          APPROVED_FIREBASE_PROJECT_ID: demo-trusted-auth
+          APPROVED_FIREBASE_UID: test-uid-no-real-user
+          APPROVED_FIREBASE_ROLE: operator
+        run: node scripts/provision-staff-claims.mjs --dry-run
       - name: Typecheck and build
         run: |
           npm run lint
