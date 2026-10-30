@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CitizenApplicationRecord, ApplicationStatus, UnionParishadConfig } from '../types';
 import { IdentityMaskedValue } from './IdentityMaskedValue';
+import { authenticatedApiFetch } from '../lib/apiAuth';
 
 interface ApplicationStatusLookupProps {
   config: UnionParishadConfig;
@@ -95,7 +96,7 @@ export const ApplicationStatusLookup: React.FC<ApplicationStatusLookupProps> = (
     setSearchedRecord(null);
 
     try {
-      const res = await fetch(`/api/applications/${encodeURIComponent(cleanId)}`);
+      const res = await authenticatedApiFetch(`/api/applications/${encodeURIComponent(cleanId)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.application) {
