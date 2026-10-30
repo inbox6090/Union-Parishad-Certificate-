@@ -96,17 +96,8 @@ const applicationStore: CitizenApplicationRecord[] = [
   }
 ];
 
-// API Key Store for External Sharing & Integrations
-const apiKeyStore: ApiKeyRecord[] = [
-  {
-    id: "key_default_01",
-    name: "ডিফল্ট অনলাইন যাচাইকরণ পোর্টাল (Live)",
-    key: "up_live_7a8f9021b453e18c90",
-    permissions: "read",
-    createdAt: new Date("2026-07-01").toISOString(),
-    status: "active"
-  }
-];
+// Legacy API keys no longer authenticate. No publicly embedded default key.
+const apiKeyStore: ApiKeyRecord[] = [];
 
 // Webhook Store for Realtime Notification Dispatching
 const webhookStore: WebhookConfig[] = [];
@@ -451,6 +442,38 @@ async function startServer() {
     next();
   });
 
+  // Zero-trust route boundaries: NEVER grant access with a browser-supplied
+  // role, query-string API key, or absence of configured keys.
+  // Explicit public routes live outside the admin namespace.
+  app.get("/api/public/config", (_req, res) => {
+    const {upName,address,upazila,district,chairmanName,secretaryName,sealText} = upConfig;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({config:{upName,address,upazila,district,chairmanName,secretaryName,sealText}});
+  });
+  const staffRoles=["operator","udc","secretary","approver","chairman","admin","super_admin"];
+  const approverRoles=["secretary","approver","chairman","admin","super_admin"];
+  const adminRoles=["admin","super_admin"];
+  // Prefix guard is registered BEFORE any /api/admin endpoints, including
+  // backup/export/restore/webhooks/API keys. HTTP requests cannot skip it.
+  app.use("/api/admin", requireAuth, requireRole(...staffRoles));
+  for (const prefix of [
+    "/api/admin/backup",
+    "/api/admin/backups",
+    "/api/admin/config",
+    "/api/admin/restore",
+    "/api/admin/backup-r2",
+    "/api/admin/project-clone",
+    "/api/admin/maintenance",
+    "/api/admin/api-keys",
+    "/api/admin/webhooks",
+    "/api/admin/export",
+    "/api/admin/apps-script-sync",
+    "/api/admin/sheets-export",
+  ]) app.use(prefix, requireRole(...adminRoles));
+  for(const prefix of ["/api/admin/approve-cert","/api/admin/cancel-cert","/api/admin/batch-approve"]) {
+    app.use(prefix, requireRole(...approverRoles));
+  }
+
   // API Routes
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", app: upConfig.upName });
@@ -470,7 +493,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/users", requireAuth, async (_req: AuthRequest, res) => {
+  app.get("/api/users", requireAuth, requireRole(...adminRoles), async (_req: AuthRequest, res) => {
     try {
       const users = await getAllUsers();
       res.json({ success: true, users });
@@ -491,7 +514,7 @@ async function startServer() {
   });
 
   // Update Admin Config
-  app.post("/api/admin/config", (req, res) => {
+  app.post("/api/admin/config", requireRole(...adminRoles), (req, res) => {
     const newConfig = req.body;
     if (newConfig && typeof newConfig === 'object') {
       upConfig = { ...upConfig, ...newConfig };
@@ -502,7 +525,7 @@ async function startServer() {
   });
 
   // Generate Certificate with Gemini AI
-  app.post("/api/certificate/generate", async (req, res) => {
+  app.post("/api/certificate/generate", requireAuth, requireRole(...approverRoles), async (req: AuthRequest, res) => {
     try {
       const {
         typeKey,
@@ -687,7 +710,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // NID OCR Scanner via Gemini Vision
-  app.post("/api/certificate/scan-nid", async (req, res) => {
+  app.post("/api/certificate/scan-nid", requireAuth, requireRole(...staffRoles), async (req: AuthRequest, res) => {
     try {
       const { frontImageBase64, backImageBase64 } = req.body;
 
@@ -1037,7 +1060,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // Batch Verify Certificates (Administrative Audit Tool)
-  app.post("/api/certificate/verify-batch", (req, res) => {
+  app.post("/api/certificate/verify-batch", requireAuth, requireRole(...staffRoles), (req: AuthRequest, res) => {
     const { items } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "কোনো ভেরিফিকেশন কোড বা তথ্য পাওয়া যায় নাই।" });
@@ -1097,7 +1120,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // Smart Gemini Citizen Assistant Endpoint
-  app.post("/api/ai/assistant", async (req, res) => {
+  app.post("/api/ai/assistant", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { prompt, history } = req.body;
       if (!prompt) {
@@ -1160,7 +1183,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // Search Citizen by NID / Birth Reg
-  app.get("/api/citizen/search", (req, res) => {
+  app.get("/api/citizen/search", requireAuth, requireRole(...staffRoles), (req: AuthRequest, res) => {
     const query = (req.query.nid || req.query.query || "").toString().trim();
     if (!query) {
       return res.status(400).json({ found: false, error: "NID বা নম্বর প্রদান করুন।" });
@@ -1383,7 +1406,7 @@ ${upConfig.defaultPromptPrefix}
 
   // Approve Certificate (One-click Chairman Action)
   app.post("/api/admin/approve-cert", (req, res) => {
-    const { id, approvedBy } = req.body;
+    const { id } = req.body;
     const certIndex = certificateStore.findIndex(c => c.id === id || c.memoNo === id);
 
     if (certIndex === -1) {
@@ -1391,7 +1414,7 @@ ${upConfig.defaultPromptPrefix}
     }
 
     const now = new Date();
-    const approvedByName = approvedBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const approvedByName = (req as AuthRequest).user!.uid;
 
     certificateStore[certIndex] = {
       ...certificateStore[certIndex],
@@ -1399,10 +1422,10 @@ ${upConfig.defaultPromptPrefix}
       approvedBy: approvedByName,
       approvedAt: now.toISOString(),
       issuedBy: approvedByName,
-      biometricVerified: req.body.biometricVerified ?? true,
-      biometricAuthType: req.body.biometricAuthType || "WebAuthn Passkey",
-      biometricTimestamp: req.body.biometricTimestamp || now.toISOString(),
-      verifiedByBiometrics: req.body.verifiedByBiometrics || approvedByName
+      biometricVerified: false, // No trusted biometric assertion verified here.
+      biometricAuthType: undefined,
+      biometricTimestamp: undefined,
+      verifiedByBiometrics: undefined
     };
 
     dispatchWebhooks('certificate.approved', certificateStore[certIndex]);
@@ -1417,7 +1440,7 @@ ${upConfig.defaultPromptPrefix}
 
   // Cancel Certificate (One-click Chairman Action)
   app.post("/api/admin/cancel-cert", (req, res) => {
-    const { id, cancelledBy, reason } = req.body;
+    const { id, reason } = req.body;
     const certIndex = certificateStore.findIndex(c => c.id === id || c.memoNo === id);
 
     if (certIndex === -1) {
@@ -1425,7 +1448,7 @@ ${upConfig.defaultPromptPrefix}
     }
 
     const now = new Date();
-    const cancelledByName = cancelledBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const cancelledByName = (req as AuthRequest).user!.uid;
 
     certificateStore[certIndex] = {
       ...certificateStore[certIndex],
@@ -1447,9 +1470,8 @@ ${upConfig.defaultPromptPrefix}
 
   // Batch Approve All Pending
   app.post("/api/admin/batch-approve", (req, res) => {
-    const { approvedBy } = req.body;
     const now = new Date();
-    const approvedByName = approvedBy || upConfig.chairmanName || "ইউপি চেয়ারম্যান";
+    const approvedByName = (req as AuthRequest).user!.uid;
     let count = 0;
 
     certificateStore.forEach((c, idx) => {
@@ -2598,29 +2620,11 @@ ${upConfig.defaultPromptPrefix}
   // PUBLIC & THIRD-PARTY EXTERNAL INTEGRATION REST API (V1)
   // ============================================================
 
-  // Helper for API Key Validation
-  const checkApiKey = (req: express.Request) => {
-    const key = (req.headers['x-api-key'] || req.query.apiKey) as string;
-    const activeKeys = apiKeyStore.filter(k => k.status === 'active');
-    if (activeKeys.length === 0) return true; // Open access if no keys configured
-    if (!key) return false;
-    const found = activeKeys.find(k => k.key === key);
-    if (found) {
-      found.lastUsedAt = new Date().toISOString();
-      return true;
-    }
-    return false;
-  };
+  // External integrations require verified Firebase bearer tokens and roles.
+  // Retired legacy x-api-key and query-string apiKey authentication completely.
 
   // 1. GET /api/v1/certificates (Query certificates for external systems)
-  app.get("/api/v1/certificates", (req, res) => {
-    if (!checkApiKey(req)) {
-      return res.status(401).json({
-        status: "unauthorized",
-        message: "অবৈধ বা অনুপস্থিত API Access Key। হেডার `x-api-key` বা কুয়েরি প্যারাম `apiKey` যোগ করুন।"
-      });
-    }
-
+  app.get("/api/v1/certificates", requireAuth, requireRole(...staffRoles), (req: AuthRequest, res) => {
     const { nid, memoNo, wardNo, typeKey, status, limit } = req.query;
     let results = [...certificateStore];
 
@@ -2666,14 +2670,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // 3. POST /api/v1/certificates/apply (External Application Submission API)
-  app.post("/api/v1/certificates/apply", (req, res) => {
-    if (!checkApiKey(req)) {
-      return res.status(401).json({
-        status: "unauthorized",
-        message: "অবৈধ API Access Key। হেডার `x-api-key` প্রদান করুন।"
-      });
-    }
-
+  app.post("/api/v1/certificates/apply", requireAuth, requireRole(...staffRoles), (req: AuthRequest, res) => {
     const { typeKey, name, father, mother, gender, village, wardNo, nid, mobile, postOffice, extra } = req.body;
 
     if (!typeKey || !name || !mother || !village || !wardNo) {
