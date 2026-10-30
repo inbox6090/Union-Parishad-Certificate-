@@ -19,7 +19,7 @@ import {
   CitizenApplicationRecord,
   ApplicationStatus
 } from "./src/types.js";
-import { requireAuth, requireRole, AuthRequest } from './src/middleware/auth.ts';
+import { requireAuth, requireRole, optionalFirebaseAuth, AuthRequest } from './src/middleware/auth.ts';
 import { canReadApplication, canChangeStatus, canIssueCertificate, toPublicVerification } from './src/middleware/api-access.ts';
 import { getOrCreateUser, getAllUsers } from './src/db/users.ts';
 
@@ -830,7 +830,7 @@ ${upConfig.defaultPromptPrefix}
   });
 
   // 3. Submit New Citizen Application (with Idempotency key protection)
-  app.post("/api/applications/submit", (req, res) => {
+  app.post("/api/applications/submit", optionalFirebaseAuth, (req: AuthRequest, res) => {
     try {
       const appData = req.body as CitizenApplicationRecord;
       if (!appData || !appData.applicantName || !appData.serviceId) {
@@ -844,8 +844,8 @@ ${upConfig.defaultPromptPrefix}
           return res.json({
             success: true,
             isDuplicate: true,
-            application: existing,
-            message: "পূর্বে দাখিলকৃত আবেদন ফেরত দেওয়া হইল।"
+            applicationId: existing.id,
+            message: "পূর্বে দাখিলকৃত আবেদন পাওয়া গিয়েছে। বিস্তারিত দেখতে যাচাইকৃত লগইন প্রয়োজন।"
           });
         }
       }
@@ -855,6 +855,7 @@ ${upConfig.defaultPromptPrefix}
 
       const newRecord: CitizenApplicationRecord = {
         ...appData,
+        applicantUid: req.user?.uid, // Never trust a caller-supplied UID.
         id: appId,
         status: 'submitted',
         createdAt: appData.createdAt || now,
