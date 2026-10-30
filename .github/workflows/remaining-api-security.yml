@@ -1,0 +1,49 @@
+name: Remaining Express API and backup security checks
+
+on:
+  pull_request:
+    paths:
+      - 'server.ts'
+      - 'src/App.tsx'
+      - 'src/middleware/express-route-policy.ts'
+      - 'tests/remaining-api-policy.test.ts'
+      - 'tests/remaining-api-http.test.mjs'
+      - '.github/workflows/remaining-api-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remaining-api-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  express-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify route policy and role matrix
+        run: node --import tsx --test tests/remaining-api-policy.test.ts
+      - name: Typecheck and build
+        run: |
+          npm run lint
+          npm run build
+      - name: Test anonymous HTTP denial on local server
+        env:
+          NODE_ENV: production
+          GOOGLE_API_KEY: ''
+          GEMINI_API_KEY: ''
+          DATABASE_URL: ''
+          GOOGLE_APPLICATION_CREDENTIALS: ''
+        run: node --test tests/remaining-api-http.test.mjs
