@@ -6,7 +6,7 @@
     "test": "node --test firestore.rules.test.mjs"
   },
   "dependencies": {
-    "@firebase/rules-unit-testing": "6.0.0",
+    "@firebase/rules-unit-testing": "5.0.2",
     "firebase": "12.17.0",
     "firebase-tools": "15.34.1"
   }
