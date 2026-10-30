@@ -42,7 +42,7 @@ test('unauthenticated request receives 401 on private application routes', async
   }
 });
 test('public QR endpoints never reveal full certificate with admin=true', async (t)=>{
-  if(!child || child.exitCode!==null) await start();
+  await start(); // previous test intentionally terminated its server
   t.after(stop);
   for(const endpoint of ['/api/certificate/verify/','/api/v1/certificates/verify/']){
     const res=await fetch(base+endpoint+'BUP-2026-1108?admin=true');
