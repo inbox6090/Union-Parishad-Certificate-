@@ -5,6 +5,7 @@ on:
     paths:
       - 'firestore.rules'
       - 'security-tests/**'
+      - 'firebase.security-tests.json'
       - '.github/workflows/firestore-security-tests.yml'
   workflow_dispatch:
 
@@ -38,4 +39,4 @@ jobs:
       - name: Run local-only Firestore Emulator tests
         env:
           CI: 'true'
-        run: ./security-tests/node_modules/.bin/firebase emulators:exec --only firestore --project demo-baheratail-rules --config security-tests/firebase.json "node --test security-tests/firestore.rules.test.mjs"
+        run: ./security-tests/node_modules/.bin/firebase emulators:exec --only firestore --project demo-baheratail-rules --config firebase.security-tests.json "node --test security-tests/firestore.rules.test.mjs"
