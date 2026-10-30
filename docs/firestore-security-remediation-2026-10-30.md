@@ -66,3 +66,9 @@ A green npm build or Firestore Emulator suite is **necessary but not sufficient*
 ## Important limitation
 
 The security change is intentionally **fail closed** and can block current frontend flows, because current applications and roles do not yet meet the strict auth/owner contract. Keep this PR Draft and do not merge it until the separate integration blockers are resolved or explicitly addressed via a staged migration. No production Firebase or paid AI API calls have been made.
+
+## Review update: opaque QR lookup keys and check coverage
+
+Public `public_verifications/{token}` document IDs must be generated with at least **24 random bytes** by a trusted, authenticated issuance backend and hex-encoded to 48 characters (e.g. `crypto.randomBytes(24).toString('hex')`). Document ID **must never equal** a certificate memo number, NID or any enumerable identifier. Firestore rules check token shape and limit public documents to the small approved field set; **shape validation does not prove randomness**. QR issuance, legacy link migration and server-side token generation have NOT yet been implemented. Existing public QR flows can break under these rules, so this change remains Draft.
+
+The Emulator test workflow now triggers on **all** pull requests instead of a path filter; this is required to make its check name eligible for future branch-protection rules. The current connector cannot access branch protection (403). Do not claim the repository is protected or merge while identity, Express API authorization, and public projection migration remain unaddressed.
