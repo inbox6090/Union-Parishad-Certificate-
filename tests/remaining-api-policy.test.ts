@@ -64,7 +64,7 @@ test('zero-role, citizen, operator, approver, admin allowlist boundaries',()=>{
   assert.equal(isAllowedAtLevel('admin',approver),false);
   assert.equal(isAllowedAtLevel('approver',approver),true);
   assert.equal(isAllowedAtLevel('admin',admin),true);
-  assert.equal(isAllowedAtLevel('admin',{...u,email:'admin@fake.local',localStorageRole:'admin'}),false);
+  assert.equal(isAllowedAtLevel('admin',({...u,email:'admin@fake.local',localStorageRole:'admin'} as any)),false);
 });
 test('every Express /api route has a declared explicit policy',()=>{
   const src=readFileSync(new URL('../server.ts',import.meta.url),'utf8');
