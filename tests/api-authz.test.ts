@@ -15,33 +15,33 @@ const admin = { uid:'admin-1', role:'admin' };
 const spoofed = { uid:'citizen-3', role:'citizen', localStorageRole:'admin', email:'admin@fake.example', body:{role:'admin'} };
 
 test('verified ID token required; missing or malformed bearer token is 401', async () => {
-  const middleware = createRequireAuth(async () => ({uid:'citizen-1',role:'citizen'}));
+  const middleware = createRequireAuth(async () => ({uid:'citizen-1',role:'citizen'} as any));
   for (const authorization of [undefined,'', 'Bearer', 'Basic abc', 'Bearer  ']) {
     const res=mockResponse(); let next=false;
-    await middleware({headers:{authorization}}, res,()=>{next=true});
+    await middleware({headers:{authorization}} as any, res as any,()=>{next=true});
     assert.equal(res.statusCode,401); assert.equal(next,false);
   }
 });
 test('tampered or revoked Firebase tokens are rejected (401)', async () => {
   const middleware = createRequireAuth(async () => { throw new Error('revoked/invalid'); });
   const res=mockResponse();
-  await middleware({headers:{authorization:'Bearer forged'}},res,()=>{throw new Error('next not expected')});
+  await middleware({headers:{authorization:'Bearer forged'}} as any,res as any,()=>{throw new Error('next not expected')});
   assert.equal(res.statusCode,401);
 });
 test('a verified Firebase identity reaches the route, without trusting a body role', async () => {
-  const middleware = createRequireAuth(async () => ({uid:'citizen-1',role:'citizen'}));
-  const req={headers:{authorization:'Bearer valid-token'},body:{role:'admin'}};
+  const middleware = createRequireAuth(async () => ({uid:'citizen-1',role:'citizen'} as any));
+  const req:any={headers:{authorization:'Bearer valid-token'},body:{role:'admin'}};
   const res=mockResponse(); let called=false;
-  await middleware(req,res,()=>{called=true});
+  await middleware(req,res as any,()=>{called=true});
   assert.equal(called,true); assert.equal(req.user.uid,'citizen-1');
 });
 test('role guard returns 403 to citizens and grants only signed claims', () => {
   const guard=requireRole('operator','secretary','approver','admin');
   const res=mockResponse(); let called=false;
-  guard({user:spoofed},res,()=>{called=true});
+  guard({user:spoofed} as any,res as any,()=>{called=true});
   assert.equal(res.statusCode,403); assert.equal(called,false);
   const success=mockResponse();
-  guard({user:secretary},success,()=>{called=true});
+  guard({user:secretary} as any,success as any,()=>{called=true});
   assert.equal(called,true);
 });
 test('authenticated non-staff can access only own UID-linked application', () => {
