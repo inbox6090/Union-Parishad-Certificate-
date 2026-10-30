@@ -20,6 +20,7 @@ import {
   ApplicationStatus
 } from "./src/types.js";
 import { requireAuth, requireRole, optionalFirebaseAuth, AuthRequest } from './src/middleware/auth.ts';
+import { classifyApiRoute, isAllowedAtLevel } from './src/middleware/express-route-policy.ts';
 import { canReadApplication, canChangeStatus, canIssueCertificate, toPublicVerification } from './src/middleware/api-access.ts';
 import { getOrCreateUser, getAllUsers } from './src/db/users.ts';
 
@@ -97,16 +98,9 @@ const applicationStore: CitizenApplicationRecord[] = [
 ];
 
 // API Key Store for External Sharing & Integrations
-const apiKeyStore: ApiKeyRecord[] = [
-  {
-    id: "key_default_01",
-    name: "ডিফল্ট অনলাইন যাচাইকরণ পোর্টাল (Live)",
-    key: "up_live_7a8f9021b453e18c90",
-    permissions: "read",
-    createdAt: new Date("2026-07-01").toISOString(),
-    status: "active"
-  }
-];
+// External API credentials must be provisioned by an authorized staff member.
+// No hard-coded production-like key or unsafe open-key fallback.
+const apiKeyStore: ApiKeyRecord[] = [];
 
 // Webhook Store for Realtime Notification Dispatching
 const webhookStore: WebhookConfig[] = [];
@@ -451,6 +445,20 @@ async function startServer() {
     next();
   });
 
+  // Fail-closed API perimeter: each public method+path is explicitly allowlisted.
+  // This runs BEFORE every route handler, including admin backup and external API.
+  app.use('/api', (req, res, next) => {
+    const level = classifyApiRoute(req.method, req.originalUrl.split('?')[0]);
+    if (level === 'public') return next();
+    if (level === 'deny') return res.status(404).json({ error: 'API route not available' });
+    return requireAuth(req as AuthRequest, res, () => {
+      if (!isAllowedAtLevel(level, (req as AuthRequest).user)) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient trusted Firebase role' });
+      }
+      next();
+    });
+  });
+
   // API Routes
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", app: upConfig.upName });
@@ -483,6 +491,20 @@ async function startServer() {
   // Get certificate types list
   app.get("/api/certificate/types", (_req, res) => {
     res.json({ types: CERTIFICATE_TYPES });
+  });
+
+  // Public view of non-sensitive union branding. Never spread full upConfig here.
+  app.get("/api/public/config", (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ config: {
+      upName: upConfig.upName ?? '',
+      address: upConfig.address ?? '',
+      upazila: upConfig.upazila ?? '',
+      district: upConfig.district ?? '',
+      chairmanName: upConfig.chairmanName ?? '',
+      secretaryName: upConfig.secretaryName ?? '',
+      sealText: upConfig.sealText ?? '',
+    } });
   });
 
   // Get Admin Config
@@ -2600,10 +2622,11 @@ ${upConfig.defaultPromptPrefix}
 
   // Helper for API Key Validation
   const checkApiKey = (req: express.Request) => {
-    const key = (req.headers['x-api-key'] || req.query.apiKey) as string;
+    // API key is only an ADDITIONAL check after verified Bearer token+role.
+    // Never accept key in query strings (they leak via logs/history/referrers).
+    const key = req.get('x-api-key');
     const activeKeys = apiKeyStore.filter(k => k.status === 'active');
-    if (activeKeys.length === 0) return true; // Open access if no keys configured
-    if (!key) return false;
+    if (activeKeys.length === 0 || !key) return false;
     const found = activeKeys.find(k => k.key === key);
     if (found) {
       found.lastUsedAt = new Date().toISOString();
