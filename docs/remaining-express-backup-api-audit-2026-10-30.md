@@ -23,7 +23,7 @@
 | `/api/applications`, status, issue | Previous Firebase token/role + UID ownership policy unchanged |
 | `/api/admin/**` | Require Firebase Admin verified, revocation-checked ID token and trusted staff role |
 | `/api/admin/backup*`, `/api/admin/backups`, `/api/admin/restore`, `/api/admin/project-clone/**`, `/api/admin/maintenance/**`, `/api/admin/api-keys/**`, `/api/admin/webhooks/**`, `/api/admin/export`, `/api/admin/apps-script-sync`, `/api/admin/sheets-export` | **Admin/super_admin only** |
-| `POST /api/admin/config` | Admin/super_admin only; staff can read config with trusted login |
+| `GET/POST /api/admin/config` | Admin/super_admin only; public client reads only `/api/public/config` allowlist |
 | `/api/admin/approve-cert`, `/api/admin/cancel-cert`, `/api/admin/batch-approve` | Secretary, approver, chairman, admin, super_admin only; approval integrity review still needed |
 | `GET /api/users` | Admin/super_admin only |
 | `/api/citizen/search`, `/api/certificate/scan-nid`, `/api/certificate/verify-batch` | Verified staff roles |
@@ -44,7 +44,7 @@ Browser localStorage roles, email strings, direct HTTP `role` fields and the ret
 1. Public code still contains **legacy API-key management**; new keys issued from `/api/admin/api-keys` are currently inert for v1 auth. Refactor integration clients onto verified Firebase Bearer tokens or a separate revocable machine-identity scheme. Never restore hardcoded/query-string keys or an 'open access if no keys' fallback.
 2. No positive staging tests with actual signed operator/admin Firebase tokens and revocation; tests prove anonymous denial but cannot prove permitted staff operations behave correctly. Run Firebase Auth Emulator or staging with authorized fake users before merge.
 3. Backup export and restore still use in-memory stores/partially unvalidated JSON, and admin-controlled outbound webhook, Apps Script, R2 and Sheets URLs may permit SSRF or unintended export. Add strict schema limits, vetted HTTPS host allowlists, idempotent restore, immutable audit and secure storage with recovery.
-4. Existing `/api/admin/approve-cert` and `cancel-cert` accept caller-provided performer names and biometric flags. Migrate to verified server-derived actor identity, separate human approval and auditable evidence before final issuance.
+4. The approval/cancellation/batch routes now derive the actor from verified Firebase UID. `approve-cert` no longer accepts fake client-side biometric proof and records `biometricVerified: false`. However, verified WebAuthn evidence, separation of duties, audit integrity and human approval policy require separate implementation before authoritative issuance.
 5. Anonymous application submit remains open and requires size/schema validation, abuse/rate limits, replay/idempotency protection and verified citizen UID migration.
 6. `/api/ai/assistant` is authenticated, but **cost/rate quota protection is still necessary** for any key-enabled production deployment.
 7. App components that fetch admin, export, backup, or external v1 APIs without bearer tokens will get 401 until they adopt `authenticatedApiFetch`, backed by provisioned Firebase staff claims. The new /api/public/config is adopted by App for public-facing base configuration.
