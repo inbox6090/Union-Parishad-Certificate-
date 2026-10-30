@@ -1,13 +1,7 @@
 name: Firestore rules emulator security tests
 
-on:
-  pull_request:
-    paths:
-      - 'firestore.rules'
-      - 'security-tests/**'
-      - 'firebase.security-tests.json'
-      - '.github/workflows/firestore-security-tests.yml'
-  workflow_dispatch:
+# Always run so administrators can safely require this status on every PR.
+on: [pull_request, workflow_dispatch]
 
 permissions:
   contents: read

@@ -59,7 +59,119 @@ service cloud.firestore {
       ]);
     }
     function validPublicVerification(certId) {
-      return request.resource.data.keys().hasAll([
+      // Document keys are 24 cryptographically random bytes, hex-encoded by a trusted issuer.
+      // Rules can validate format, not prove entropy; never derive a key from memoNo/NID.
+      return certId is string &&
+      certId.matches('^[a-f0-9]{48}
+        'memoNo', 'typeLabel', 'issueDate', 'issuedBy', 'status'
+      ]) &&
+      request.resource.data.keys().hasOnly([
+        'memoNo', 'typeLabel', 'issueDate', 'issuedBy', 'status'
+      ]) &&
+      request.resource.data.memoNo is string &&
+      request.resource.data.memoNo.size() > 0 &&
+      request.resource.data.memoNo.size() <= 128 &&
+      request.resource.data.typeLabel is string &&
+      request.resource.data.typeLabel.size() <= 120 &&
+      request.resource.data.issueDate is string &&
+      request.resource.data.issueDate.size() <= 40 &&
+      request.resource.data.issuedBy is string &&
+      request.resource.data.issuedBy.size() <= 150 &&
+      request.resource.data.status in ['issued', 'revoked'];
+    }
+
+    // No permissive catch-all. A matching permissive rule would override deny.
+    match /{path=**} {
+      allow read, write: if false;
+    }
+
+    // Full certificates carry NID, phone and family details: NEVER public read.
+    match /certificates/{certId} {
+      allow get, list: if isStaff();
+      allow create: if isApprover() ||
+        (isOperator() && request.resource.data.get('status', 'draft') in ['draft', 'pending']);
+      allow update: if isApprover() ||
+        (isOperator() &&
+         resource.data.get('status', 'draft') in ['draft', 'pending'] &&
+         request.resource.data.get('status', 'draft') in ['draft', 'pending']);
+      allow delete: if isAdmin();
+    }
+
+    // Public QR read is a DIFFERENT document keyed by a high-entropy opaque token.
+    // Publish from a trusted issuance flow after human approval (not yet wired).
+    match /public_verifications/{certId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isApprover() && validPublicVerification(certId);
+      allow update: if isApprover() &&
+        request.resource.data.memoNo == resource.data.memoNo &&
+        validPublicVerification(certId);
+      allow delete: if false; // Revoke rather than erase issuance history.
+    }
+
+    // An application belongs to a verified Firebase UID, never a user-supplied citizenId.
+    // Existing HTTP submission payloads lack applicantUid: migration is required.
+    match /applications/{appId} {
+      allow get, list: if isStaff() || sameApplicant();
+      allow create: if signedIn() && validApplication() &&
+        (request.resource.data.applicantUid == request.auth.uid || isStaff());
+      allow update: if
+        (sameApplicant() &&
+         resource.data.status == 'draft' &&
+         request.resource.data.status == 'draft' &&
+         unchangedApplicant() &&
+         permittedApplicantFields()) ||
+        (isAdmin() && unchangedApplicant()) ||
+        (isApprover() && unchangedApplicant() && permittedDecisionFields()) ||
+        (isOperator() && unchangedApplicant() &&
+         request.resource.data.status in ['submitted', 'under_review', 'needs_information'] &&
+         permittedDecisionFields());
+      allow delete: if isAdmin();
+    }
+
+    // Private master register. Staff roles must be provisioned server-side.
+    match /citizens/{citizenId} {
+      allow get, list: if isStaff();
+      allow create, update: if isOperator();
+      allow delete: if isAdmin();
+    }
+
+    // Legacy configs contain non-public material; only privileged roles can read.
+    match /configs/{configId} {
+      allow get, list: if isStaff() && configId != 'secrets';
+      allow create, update, delete: if isApprover() && configId != 'secrets';
+    }
+
+    // Published, non-sensitive union identity is separate from internal configs.
+    match /public_configs/{configId} {
+      allow get: if configId == 'union';
+      allow list: if false;
+      allow create, update: if isApprover() && configId == 'union' &&
+        request.resource.data.keys().hasOnly([
+          'unionName', 'officeAddress', 'officePhone', 'sealUrl'
+        ]);
+      allow delete: if isAdmin();
+    }
+
+    // Append-only client activity traces; authoritative audit logs should be server-side.
+    match /audit_logs/{logId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff() &&
+        request.resource.data.get('actorUid', '') == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Sensitive administrative data: server-only for API keys, secrets and webhooks.
+    match /apiKeys/{id} { allow read, write: if false; }
+    match /webhooks/{id} { allow read, write: if false; }
+    match /backups/{id} { allow read, write: if isAdmin(); }
+    match /admins/{id} { allow read, write: if isAdmin(); }
+
+    // No client-supplied role authority. The /users collection remains deny-by-default.
+  }
+}
+) &&
+      request.resource.data.keys().hasAll([
         'memoNo', 'typeLabel', 'issueDate', 'issuedBy', 'status'
       ]) &&
       request.resource.data.keys().hasOnly([
