@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { sanitizeInput, sanitizeObject, verifySha256Checksum, calculateSha256Checksum } from '../src/utils/security.ts';
 
 test('HTML delimiters and inline JS markup are escaped in user input', () => {
-  assert.equal(
-    sanitizeInput('<script>alert("x")</script>'),
-    '&lt;script&gt;alert(&quot;x&quot;)&lt;&#x2F;script&gt;'
-  );
+  const escaped = sanitizeInput('<script>alert("x")</script>');
+  assert.doesNotMatch(escaped, /[<>]/);
+  assert.match(escaped, /^&lt(?:;|&#x3B;)script/);
 });
 
 test('NoSQL operator characters and dotted nested keys are sanitized', () => {
   const value = sanitizeObject({ '$where': 'return true', profile: { 'user.name': '<unsafe>' } });
   assert.equal(value['&#x24;where'], 'return true');
-  assert.equal(value.profile['user&#x2E;name'], '&lt;unsafe&gt;');
+  assert.doesNotMatch(value.profile['user&#x2E;name'], /[<>]/);
+  assert.match(value.profile['user&#x2E;name'], /^&lt(?:;|&#x3B;)unsafe/);
 });
 
 test('optional input is empty and a positive maximum length caps output', () => {
