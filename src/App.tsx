@@ -71,14 +71,14 @@ export default function App() {
 
   // Fetch initial config from server & Firebase Firestore
   useEffect(() => {
-    fetch('/api/admin/config')
+    fetch('/api/public/config')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((data) => {
         if (data && data.config) {
-          setConfig(data.config);
+          setConfig(previous => ({...previous,...data.config}));
         }
       })
       .catch((err) => console.warn('Config fetch notice (using default configuration):', err));
