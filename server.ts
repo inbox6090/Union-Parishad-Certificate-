@@ -915,7 +915,7 @@ ${upConfig.defaultPromptPrefix}
     }
     appRecord.updatedAt = now;
     appRecord.auditTrail.push({
-      status,
+      status: status as ApplicationStatus,
       note: note || `স্ট্যাটাস পরিবর্তন: ${status}`,
       performedBy: req.user!.uid,
       role: "ইউপি কর্তৃপক্ষ",
