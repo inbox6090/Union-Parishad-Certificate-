@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CitizenApplicationRecord, ApplicationStatus, UnionParishadConfig } from '../types';
 import { IdentityMaskedValue } from './IdentityMaskedValue';
+import { authenticatedApiFetch } from '../lib/apiAuth';
 
 interface ApplicationStatusLookupProps {
   config: UnionParishadConfig;
@@ -95,7 +96,7 @@ export const ApplicationStatusLookup: React.FC<ApplicationStatusLookupProps> = (
     setSearchedRecord(null);
 
     try {
-      const res = await fetch(`/api/applications/${encodeURIComponent(cleanId)}`);
+      const res = await authenticatedApiFetch(`/api/applications/${encodeURIComponent(cleanId)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.application) {
@@ -113,7 +114,19 @@ export const ApplicationStatusLookup: React.FC<ApplicationStatusLookupProps> = (
 
       setErrorMessage('উক্ত ট্র্যাকিং আইডি বা স্মারক নম্বরে কোনো আবেদন খুঁজে পাওয়া যায়নি। অনুগ্রহ করে সঠিক আইডি লিখুন।');
     } catch (err: any) {
-      setErrorMessage('সার্ভারের সাথে যোগাযোগে বিঘ্ন ঘটেছে। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।');
+      // Legacy citizen draft is available ONLY on the same device; never query
+      // another applicant's private record without a verified Firebase ID token.
+      const saved = localStorage.getItem(`app_${cleanId}`);
+      if (saved) {
+        try {
+          const localRecord = JSON.parse(saved);
+          if (localRecord && localRecord.id === cleanId) {
+            setSearchedRecord(localRecord);
+            return;
+          }
+        } catch {}
+      }
+      setErrorMessage('নিজস্ব আবেদন দেখতে Firebase লগইন করুন। আগে সংরক্ষিত আবেদন হলে একই ডিভাইসে পরীক্ষা করুন।');
     } finally {
       setIsLoading(false);
     }

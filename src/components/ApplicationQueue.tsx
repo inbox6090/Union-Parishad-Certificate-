@@ -29,6 +29,7 @@ import {
   CertificateRecord 
 } from '../types';
 import { IdentityMaskedValue } from './IdentityMaskedValue';
+import { authenticatedApiFetch } from '../lib/apiAuth';
 
 interface ApplicationQueueProps {
   config: UnionParishadConfig;
@@ -143,7 +144,7 @@ export const ApplicationQueue: React.FC<ApplicationQueueProps> = ({
   onCertificateIssued,
   onOpenCertificate
 }) => {
-  const [applications, setApplications] = useState<CitizenApplicationRecord[]>(SAMPLE_APPLICATIONS);
+  const [applications, setApplications] = useState<CitizenApplicationRecord[]>([]);
   const [selectedApp, setSelectedApp] = useState<CitizenApplicationRecord | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [wardFilter, setWardFilter] = useState<string>('all');
@@ -161,19 +162,16 @@ export const ApplicationQueue: React.FC<ApplicationQueueProps> = ({
   const fetchApplications = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/applications');
+      const res = await authenticatedApiFetch('/api/applications');
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.applications) && data.applications.length > 0) {
-          const merged = [...data.applications];
-          SAMPLE_APPLICATIONS.forEach(s => {
-            if (!merged.some(m => m.id === s.id)) merged.push(s);
-          });
-          setApplications(merged);
+        if (Array.isArray(data.applications)) {
+          setApplications(data.applications);
         }
       }
     } catch (err) {
-      console.warn('Error fetching application queue:', err);
+      setApplications([]);
+      console.warn('Private queue requires verified staff login:', err);
     } finally {
       setIsLoading(false);
     }
@@ -216,16 +214,18 @@ export const ApplicationQueue: React.FC<ApplicationQueueProps> = ({
     };
 
     try {
-      await fetch(`/api/applications/${selectedApp.id}/status`, {
+      const response = await authenticatedApiFetch(`/api/applications/${selectedApp.id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus, note: actionNote })
       });
-    } catch (err) {
-      console.warn('Notice updating status:', err);
-    } finally {
+      if (!response.ok) throw new Error('Status change rejected by server');
       setApplications(prev => prev.map(a => a.id === selectedApp.id ? updatedRecord : a));
       setSelectedApp(updatedRecord);
+    } catch (err) {
+      console.warn('Unauthorized or invalid status change:', err);
+      alert('স্ট্যাটাস পরিবর্তন করা যায়নি। Firebase Staff Login এবং যথাযথ অনুমতি প্রয়োজন।');
+    } finally {
       setIsProcessingAction(false);
     }
   };
@@ -236,7 +236,7 @@ export const ApplicationQueue: React.FC<ApplicationQueueProps> = ({
     setIsProcessingAction(true);
 
     try {
-      const res = await fetch(`/api/applications/${selectedApp.id}/issue`, {
+      const res = await authenticatedApiFetch(`/api/applications/${selectedApp.id}/issue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

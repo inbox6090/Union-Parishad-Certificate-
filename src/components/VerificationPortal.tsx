@@ -12,11 +12,8 @@ import {
   Layers,
   Upload
 } from 'lucide-react';
-import { searchCertificateInFirebase } from '../firebase';
-import { CertificateRecord, UnionParishadConfig } from '../types';
+import { UnionParishadConfig } from '../types';
 import { sanitizeInput } from '../utils/security';
-import { formatBanglaDate, generateSecurityChecksum } from '../lib/utils';
-import { CertificateView } from './CertificateView';
 import { BulkQrVerifier } from './BulkQrVerifier';
 
 interface VerificationPortalProps {
@@ -29,7 +26,10 @@ export const VerificationPortal: React.FC<VerificationPortalProps> = ({ config }
   const [loading, setLoading] = useState(false);
   const [verificationData, setVerificationData] = useState<{
     found: boolean;
-    certificate?: CertificateRecord;
+    verification?: {
+      memoNo: string; typeLabel: string; issueDate: string; issuedBy: string;
+      status: string; isValid: boolean;
+    };
     message?: string;
   } | null>(null);
 
@@ -37,51 +37,16 @@ export const VerificationPortal: React.FC<VerificationPortalProps> = ({ config }
     if (e) e.preventDefault();
     const sanitizedMemo = sanitizeInput(memoInput.trim(), 100);
     if (!sanitizedMemo) return;
-
     setLoading(true);
     setVerificationData(null);
-
     try {
       const res = await fetch(`/api/certificate/verify/${encodeURIComponent(sanitizedMemo)}`);
+      if (!res.ok) throw new Error('Verification service unavailable');
       const data = await res.json();
-      
-      if (data.found && data.certificate) {
-        setVerificationData(data);
-      } else {
-        // Fallback to Firebase Firestore
-        const fbRecord = await searchCertificateInFirebase(sanitizedMemo);
-        if (fbRecord) {
-          setVerificationData({
-            found: true,
-            certificate: fbRecord,
-            message: 'ফায়ারবেস ক্লাউড ডাটাবেস হইতে সফলভাবে পাওয়া গিয়াছে।'
-          });
-        } else {
-          setVerificationData(data);
-        }
-      }
-    } catch (err) {
-      // Direct Firebase Firestore check on network error
-      try {
-        const fbRecord = await searchCertificateInFirebase(sanitizedMemo);
-        if (fbRecord) {
-          setVerificationData({
-            found: true,
-            certificate: fbRecord,
-            message: 'ফায়ারবেস ক্লাউড ডাটাবেস হইতে সফলভাবে পাওয়া গিয়াছে।'
-          });
-        } else {
-          setVerificationData({
-            found: false,
-            message: 'যাচাইকরণ সার্ভারে সংযোগে ত্রুটি ঘটিয়াছে।'
-          });
-        }
-      } catch (fbErr) {
-        setVerificationData({
-          found: false,
-          message: 'যাচাইকরণ সার্ভারে সংযোগে ত্রুটি ঘটিয়াছে।'
-        });
-      }
+      setVerificationData(data);
+    } catch {
+      // Never read full private certificates from Firestore in a public flow.
+      setVerificationData({ found: false, message: 'যাচাইকরণ সার্ভারে সংযোগে ত্রুটি ঘটিয়াছে।' });
     } finally {
       setLoading(false);
     }
@@ -161,83 +126,23 @@ export const VerificationPortal: React.FC<VerificationPortalProps> = ({ config }
           {/* Verification Result Section */}
           {verificationData && (
             <div className="animate-fade-in space-y-6">
-              {verificationData.found && verificationData.certificate ? (
-                <div className="space-y-6">
-                  {/* Authenticated Banner */}
-                  <div className="bg-emerald-50 border-2 border-emerald-500 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow">
-                        <CheckCircle2 className="w-8 h-8" />
-                      </div>
-                      <div>
-                        <span className="inline-block bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full mb-0.5">
-                          অফিশিয়ালি সত্যায়িত ও বৈধ
-                        </span>
-                        <h3 className="text-lg font-extrabold text-emerald-950">
-                          উক্ত স্মারক নম্বরটি {config.upName} এর অফিসিয়াল ডাটাবেসে সংরক্ষিত রহিয়াছে।
-                        </h3>
-                      </div>
-                    </div>
-
-                    <div className="text-right text-xs text-slate-600">
-                      <p className="font-bold text-emerald-950">
-                        ইস্যুর তারিখ: {formatBanglaDate(verificationData.certificate.issueDateEn || verificationData.certificate.issueDate, 'full')}
-                      </p>
-                      <p className="text-slate-500">অনুমোদনকারী: {verificationData.certificate.issuedBy}</p>
-                    </div>
+              {verificationData.found && verificationData.verification ? (
+                <div className="space-y-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-6">
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck className="w-9 h-9 text-emerald-700" />
+                    <h3 className="text-xl font-bold text-emerald-950">
+                      {verificationData.verification.isValid ? 'সনদটি অনলাইনে যাচাইকৃত' : 'সনদটি আর বৈধ নয়'}
+                    </h3>
                   </div>
-
-                  {/* Citizen Details Quick Summary Box */}
-                  <div className="bg-white p-5 rounded-2xl shadow border border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <div>
-                        <p className="text-slate-500">নাগরিকের নাম:</p>
-                        <p className="font-bold text-slate-900 text-sm">{verificationData.certificate.citizen.name}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <div>
-                        <p className="text-slate-500">সনদের ধরন:</p>
-                        <p className="font-bold text-slate-900 text-sm">{verificationData.certificate.typeLabel}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <div>
-                        <p className="text-slate-500">ঠিকানা ও ওয়ার্ড:</p>
-                        <p className="font-bold text-slate-900 text-sm">
-                          গ্রাম: {verificationData.certificate.citizen.village}, ওয়ার্ড নং {verificationData.certificate.citizen.wardNo}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <div>
-                        <p className="text-slate-500">সিকিউরিটি হ্যাশ সিগনেচার:</p>
-                        <p className="font-mono font-bold text-emerald-900 text-xs bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block">
-                          {generateSecurityChecksum(
-                            verificationData.certificate.memoNo,
-                            verificationData.certificate.citizen.nid || verificationData.certificate.citizen.birthNo,
-                            verificationData.certificate.issueDateEn || verificationData.certificate.issueDate
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Full Certificate Document Display */}
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-300">
-                    <h4 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-1.5">
-                      <Award className="w-4 h-4 text-emerald-700" />
-                      <span>ডিজিটাল প্রত্যয়নপত্রের পূর্ণাঙ্গ কপি:</span>
-                    </h4>
-                    <CertificateView certificate={verificationData.certificate} config={config} />
-                  </div>
+                  <p><strong>স্মারক নম্বর:</strong> {verificationData.verification.memoNo}</p>
+                  <p><strong>সনদের ধরন:</strong> {verificationData.verification.typeLabel}</p>
+                  <p><strong>ইস্যুর তারিখ:</strong> {verificationData.verification.issueDate}</p>
+                  <p><strong>ইস্যুকারী:</strong> {verificationData.verification.issuedBy}</p>
+                  <p><strong>বর্তমান অবস্থা:</strong> {verificationData.verification.status}</p>
+                  <p className="text-xs text-slate-600">
+                    নাগরিকের গোপন তথ্য এবং পূর্ণাঙ্গ সনদের কপি এই পাবলিক পৃষ্ঠায় প্রকাশ করা হয় না।
+                    নিজস্ব সনদ সংগ্রহের জন্য অনুমোদিত অফিসে যোগাযোগ করুন।
+                  </p>
                 </div>
               ) : (
                 /* Not Found Banner */
