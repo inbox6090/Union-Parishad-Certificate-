@@ -25,7 +25,7 @@ Citizen browser → Apps Script HTML Web App → Google Sheets (Applications + A
 
 ## ১) Google Sheet তৈরি ও স্ক্রিপ্ট যুক্ত করুন
 
-1. দাপ্তরিক Google account-এ সাইন-ইন করে **নতুন একটি private Google Sheet** তৈরি করুন, নাম `UPSM Google Workspace Application Register`। `Anyone with the link` শেয়ারিং **Off/Restricted** রাখুন।
+1. দাপ্তরিক Google account-এ সাইন-ইন করে **ইতোমধ্যে প্রস্তুত করা ব্যক্তিগত Staging UPSM Google Sheet** ব্যবহার করুন। নতুন Sheet তৈরি করার প্রয়োজন নেই। `Anyone with the link` শেয়ারিং **Off/Restricted** রাখুন। (নতুন পরিবেশে পরীক্ষা করলে একই `Applications` ও `Audit` কাঠামোর নতুন private Sheet তৈরি করুন।)
 2. Sheet → **Extensions → Apps Script** খুলুন। স্বয়ংক্রিয় Code.gs খালি হলে এই প্যাকেজের `Code.gs` পুরোটা paste করুন।
 3. Apps Script editor → `+` → **HTML** → file name `Index`; `Index.html`-এর সম্পূর্ণ source paste করুন।
 4. ঐচ্ছিক: **Project Settings → Show appsscript.json** → এই প্যাকেজের `appsscript.json`-এর manifest paste করুন (Google authorization scopes চেক করুন)।
