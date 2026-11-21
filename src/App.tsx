@@ -34,6 +34,23 @@ import { applySecurityMetaTags } from './utils/securityHeaders';
 import { Sparkles, Bot, Mic, MessageSquare, WifiOff, HardDrive } from 'lucide-react';
 
 export default function App() {
+  // Workspace is opt-in: set this after publishing the separately audited Apps Script.
+  // The public React client only navigates to the Google-hosted form; it never sends PII.
+  const workspaceWebAppUrl = (import.meta.env.VITE_GOOGLE_WORKSPACE_WEBAPP_URL || '').trim();
+  const googleWorkspaceEnabled = /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/.test(workspaceWebAppUrl);
+  const openWorkspace = (serviceKey?: string, view?: 'track') => {
+    // This pilot intentionally supports five services; never silently relabel another
+    // certificate request as citizenship when navigating from the full legacy catalog.
+    const workspacePilotServices = ['citizenship', 'character', 'permanent_resident', 'warish', 'correction'];
+    if (serviceKey && !workspacePilotServices.includes(serviceKey)) {
+      window.alert('এই সেবাটি Google Workspace পরীক্ষামূলক ব্যবস্থায় এখনও চালু হয়নি। অনুগ্রহ করে ইউপি অফিসের সঙ্গে যোগাযোগ করুন।');
+      return;
+    }
+    const url = new URL(workspaceWebAppUrl);
+    if (serviceKey) url.searchParams.set('service', serviceKey);
+    if (view) url.searchParams.set('view', view);
+    window.location.assign(url.toString());
+  };
   const [activeTab, setActiveTab] = useState<string>('home');
   const [config, setConfig] = useState<UnionParishadConfig>(DEFAULT_UP_CONFIG);
   const [generatedCert, setGeneratedCert] = useState<CertificateRecord | null>(null);
@@ -98,6 +115,10 @@ export default function App() {
   };
 
   const handleNavigateTab = (tab: string) => {
+    if (googleWorkspaceEnabled && (tab === 'wizard' || tab === 'track')) {
+      openWorkspace(undefined, tab === 'track' ? 'track' : undefined);
+      return;
+    }
     setActiveTab(tab);
     if (tab !== 'create') {
       setGeneratedCert(null);
@@ -148,9 +169,14 @@ export default function App() {
         {/* Main Body Canvas */}
         <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 my-2">
         {activeTab === 'home' && (
-          <PublicProttoyonPortal 
-            config={config} 
+          <PublicProttoyonPortal
+            config={config}
+            workspaceWebAppUrl={googleWorkspaceEnabled ? workspaceWebAppUrl : undefined}
             onStartApplication={(serviceKey) => {
+              if (googleWorkspaceEnabled) {
+                openWorkspace(serviceKey);
+                return;
+              }
               setSelectedServiceForWizard(serviceKey);
               setActiveTab('wizard');
             }} 

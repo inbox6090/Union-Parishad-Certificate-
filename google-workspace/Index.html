@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{font-family:system-ui,-apple-system,"Noto Sans Bengali",sans-serif;color:#132a25;background:#f1f6f3}
+    *{box-sizing:border-box}body{margin:0}header{background:linear-gradient(135deg,#064e3b,#065f46,#0c2a45);padding:30px 16px 34px;color:#fff}
+    .container{width:min(830px,calc(100% - 28px));margin:auto}.tag{display:inline-block;background:#ffffff19;border:1px solid #ffffff35;padding:7px 12px;border-radius:18px;font-size:12px}
+    h1{font-size:clamp(22px,5vw,34px);margin:13px 0 9px;line-height:1.45}header p{line-height:1.75;color:#d3f3e8;font-size:14px;max-width:690px}
+    main{margin-top:-18px;margin-bottom:48px}.panel{background:#fff;padding:24px;border:1px solid #e0e9e4;border-radius:18px;box-shadow:0 12px 28px #12382b12}
+    .tabs{display:flex;gap:8px;margin-bottom:23px;padding:5px;background:#e8f2ec;border-radius:14px}.tabs button{flex:1;background:transparent;color:#285b4b;border:0;border-radius:10px;padding:11px;font-size:14px;font-weight:750;cursor:pointer}
+    .tabs .active{background:#086b4a;color:white}h2{font-size:20px;margin:4px 0 8px}p.muted{font-size:13px;color:#526e63;line-height:1.8;margin:0 0 17px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.field{display:flex;flex-direction:column;gap:5px}.wide{grid-column:span 2}
+    label{font-weight:700;font-size:13px;color:#1b3c30}input,select,textarea{font:inherit;font-size:15px;width:100%;border:1px solid #bacfc4;border-radius:10px;padding:11px 12px;background:#fff;color:#19392d;min-height:45px}
+    textarea{min-height:90px;resize:vertical}input:focus,textarea:focus,select:focus{outline:2px solid #2d9d76;outline-offset:1px}.consent{display:flex;gap:9px;align-items:flex-start;font-size:13px;line-height:1.65;margin:20px 0}
+    .consent input{width:18px;min-height:unset;height:18px;flex:none;margin-top:4px}.primary{border:0;cursor:pointer;padding:13px 20px;border-radius:12px;background:#057047;color:white;font-size:15px;font-weight:800;width:100%}
+    .primary:disabled{opacity:.57;cursor:wait}.secondary{border:1px solid #c8d7ce;background:white;color:#08674d;padding:8px 11px;border-radius:8px;font-weight:750;cursor:pointer}
+    .notice{font-size:12px;line-height:1.8;border-radius:10px;padding:11px 13px;background:#f1f7f3;border:1px solid #d9e9df;color:#355b4e;margin:15px 0}
+    .result{display:none;border-radius:12px;padding:16px;margin:16px 0;background:#e9f8ef;border:1px solid #a3d8b8;color:#17573b;line-height:1.8;overflow-wrap:anywhere}
+    .result.error{display:block;background:#fff1f0;border-color:#f2c2be;color:#9c231b}.result.visible{display:block}.receipt{font-size:16px;font-weight:800}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}footer{text-align:center;font-size:12px;color:#5c796f;margin:26px 8px;line-height:1.9}
+    .honey{position:absolute;left:-99999px;top:-99999px;opacity:0}button:focus-visible{outline:3px solid #f2b84b;outline-offset:2px}
+    @media(max-width:570px){.grid{grid-template-columns:1fr}.wide{grid-column:span 1}.panel{padding:17px}header{padding:22px 14px 34px}}
+  </style>
+</head>
+<body data-initial-service="<?= initialService ?>" data-initial-view="<?= initialView ?>">
+<header>
+  <div class="container">
+    <span class="tag">০২নং বহেড়াতৈল ইউনিয়ন পরিষদ · সখিপুর, টাঙ্গাইল</span>
+    <h1>অনলাইন নাগরিক সনদ আবেদন</h1>
+    <p>এখানে আবেদন জমা ও বর্তমান অবস্থা জানা যাবে। জমা দেওয়া মানে সনদ অনুমোদিত নয়। কর্মকর্তা নথি যাচাই করে চূড়ান্ত সিদ্ধান্ত নেবেন।</p>
+  </div>
+</header>
+<main class="container">
+  <div class="panel">
+    <div class="tabs" role="tablist" aria-label="আবেদন ও ট্র্যাকিং">
+      <button type="button" id="applyTab" class="active" onclick="showTab('apply')" aria-selected="true">নতুন আবেদন</button>
+      <button type="button" id="trackTab" onclick="showTab('track')" aria-selected="false">আবেদনের অবস্থা</button>
+    </div>
+    <section id="apply" aria-labelledby="applyHeading">
+      <h2 id="applyHeading">আবেদন ফরম</h2>
+      <p class="muted">সঠিক তথ্য দিন। পূর্ণ NID/জন্মনিবন্ধন ও মোবাইল নম্বর Google-এর ব্যক্তিগত রেজিস্টারে সংরক্ষিত হবে; প্রকাশ্য সাইটে দেখানো হবে না।</p>
+      <form id="applicationForm">
+        <div class="grid">
+          <div class="field wide"><label for="service">সনদের ধরন *</label><select id="service" name="service" required>
+            <option value="citizenship">নাগরিকত্ব সনদপত্র</option>
+            <option value="character">চারিত্রিক সনদপত্র</option>
+            <option value="permanent_resident">স্থায়ী বাসিন্দা সনদপত্র</option>
+            <option value="warish">ওয়ারিশান / উত্তরাধিকার (মানব যাচাই)</option>
+            <option value="correction">তথ্য সংশোধন প্রত্যয়ন (মানব যাচাই)</option>
+          </select></div>
+          <div class="field"><label for="name">আবেদনকারীর নাম *</label><input id="name" name="name" autocomplete="name" maxlength="100" required></div>
+          <div class="field"><label for="mobile">মোবাইল নম্বর *</label><input id="mobile" name="mobile" autocomplete="tel" inputmode="tel" placeholder="01XXXXXXXXX" maxlength="20" required></div>
+          <div class="field"><label for="father">পিতার নাম *</label><input id="father" name="father" maxlength="100" required></div>
+          <div class="field"><label for="mother">মাতার নাম *</label><input id="mother" name="mother" maxlength="100" required></div>
+          <div class="field"><label for="village">গ্রাম *</label><input id="village" name="village" maxlength="100" required></div>
+          <div class="field"><label for="ward">ওয়ার্ড *</label><select id="ward" name="ward" required>
+            <option value="">ওয়ার্ড নির্বাচন</option>
+            <option value="1">০১</option><option value="2">০২</option><option value="3">০৩</option>
+            <option value="4">০৪</option><option value="5">০৫</option><option value="6">০৬</option>
+            <option value="7">০৭</option><option value="8">০৮</option><option value="9">০৯</option>
+          </select></div>
+          <div class="field"><label for="idType">পরিচয়পত্রের ধরন *</label><select id="idType" name="idType" required><option value="NID">NID</option><option value="BRN">জন্ম নিবন্ধন</option></select></div>
+          <div class="field"><label for="identityNo">পরিচয় নম্বর *</label><input id="identityNo" name="identityNo" maxlength="20" inputmode="numeric" required></div>
+          <div class="field wide"><label for="purpose">আবেদনের উদ্দেশ্য (ঐচ্ছিক)</label><textarea id="purpose" name="purpose" maxlength="300"></textarea></div>
+        </div>
+        <div class="honey"><label for="extra">Leave this empty</label><input id="extra" name="extra" tabindex="-1" autocomplete="off"></div>
+        <label class="consent"><input type="checkbox" id="consent" required><span>আমি নিশ্চিত করছি যে তথ্যগুলো আমার বা আইনসঙ্গতভাবে প্রতিনিধিত্ব করা ব্যক্তির, এবং সনদ আবেদনের উদ্দেশ্যে তথ্য সংরক্ষণ ও যাচাইয়ে সম্মতি দিচ্ছি।</span></label>
+        <div class="notice">ওয়ারিশ ও সংশোধন সনদের ক্ষেত্রে স্বতন্ত্র প্রমাণক, উত্তরাধিকার তালিকা ও স্থানীয় যাচাই পরবর্তীতে কর্মকর্তা গ্রহণ করবেন। ফি, অনুমোদনকারী ও চূড়ান্ত ভাষা কর্তৃপক্ষ নির্ধারণ করবেন।</div>
+        <button type="submit" id="submitBtn" class="primary">আবেদন জমা দিন</button>
+      </form>
+      <div id="applyMessage" class="result" role="status" aria-live="polite"></div>
+    </section>
+    <section id="track" aria-labelledby="trackHeading" hidden>
+      <h2 id="trackHeading">আবেদনের বর্তমান অবস্থা</h2>
+      <p class="muted">আবেদন জমার সময় পাওয়া ID এবং গোপন ট্র্যাকিং কোড দুটিই প্রয়োজন। কোড অন্য কাউকে দেবেন না।</p>
+      <form id="trackingForm">
+        <div class="grid">
+          <div class="field wide"><label for="applicationId">আবেদন ID *</label><input id="applicationId" required placeholder="UPSM-2026-XXXXXXXXXXXXXX" autocomplete="off"></div>
+          <div class="field wide"><label for="trackingSecret">গোপন ট্র্যাকিং কোড *</label><input id="trackingSecret" required placeholder="আবেদন রসিদের কোড" autocomplete="off"></div>
+        </div>
+        <button type="submit" id="trackBtn" class="primary" style="margin-top:18px">অবস্থা দেখুন</button>
+      </form>
+      <div id="trackMessage" class="result" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+  <footer>০২নং বহেড়াতৈল ইউনিয়ন পরিষদ · Google Workspace-ভিত্তিক আবেদন সেবা<br>এই ওয়েব অ্যাপ নিজে কোনো স্বাক্ষরিত বা সরকারি অনুমোদিত সনদ ইস্যু করে না।</footer>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const initialService = document.body.dataset.initialService;
+  if ([...$('service').options].some(x => x.value === initialService)) $('service').value = initialService;
+  let requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : '';
+  if (document.body.dataset.initialView === 'track') showTab('track');
+  const text = (parent, s, bold = false) => { const n = document.createElement('div'); n.textContent = s; if (bold) n.className = 'receipt'; parent.appendChild(n); };
+  const clearResult = id => { const el = $(id); el.className = 'result'; el.replaceChildren(); return el; };
+  function failure(id, err) { const el = clearResult(id); el.classList.add('error'); text(el, err && err.message ? err.message : 'সার্ভার ত্রুটি। আবার চেষ্টা করুন।'); }
+  window.showTab = function (tab) {
+    $('apply').hidden = tab !== 'apply'; $('track').hidden = tab !== 'track';
+    ['apply','track'].forEach(k => { $(k + 'Tab').classList.toggle('active', tab === k); $(k + 'Tab').setAttribute('aria-selected', String(tab === k)); });
+  };
+  $('applicationForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (!requestId) { failure('applyMessage', { message: 'নিরাপদ ব্রাউজার প্রয়োজন। Chrome ব্যবহার করুন।' }); return; }
+    const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'জমা হচ্ছে…';
+    const f = new FormData(event.target);
+    const payload = Object.fromEntries(f.entries()); payload.requestId = requestId; payload.consent = $('consent').checked;
+    google.script.run.withSuccessHandler(function (receipt) {
+      btn.disabled = false; btn.textContent = 'আবেদন জমা দিন';
+      const el = clearResult('applyMessage'); el.classList.add('visible');
+      if (receipt.duplicate) { text(el, receipt.message); text(el, 'আবেদন ID: ' + receipt.applicationId, true); return; }
+      text(el, 'আবেদন সফলভাবে জমা হয়েছে — এটি চূড়ান্ত সনদ নয়।', true);
+      text(el, 'আবেদন ID: ' + receipt.applicationId);
+      text(el, 'গোপন ট্র্যাকিং কোড: ' + receipt.trackingSecret);
+      text(el, 'দুটি তথ্য ব্যক্তিগতভাবে সংরক্ষণ করুন; হারালে সেবা কেন্দ্রের সঙ্গে যোগাযোগ করতে হবে।');
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary'; copy.textContent = 'রসিদ কপি করুন';
+      copy.onclick = () => navigator.clipboard.writeText('আবেদন ID: ' + receipt.applicationId + '\nগোপন কোড: ' + receipt.trackingSecret).then(() => { copy.textContent = 'কপি হয়েছে'; }).catch(() => { copy.textContent = 'কপি করা যায়নি'; });
+      actions.appendChild(copy); el.appendChild(actions);
+      $('applicationId').value = receipt.applicationId; $('trackingSecret').value = receipt.trackingSecret;
+      requestId = crypto.randomUUID(); event.target.reset();
+    }).withFailureHandler(function (err) { btn.disabled = false; btn.textContent = 'আবেদন জমা দিন'; failure('applyMessage', err); }).submitApplication(payload);
+  });
+  $('trackingForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    const btn = $('trackBtn'); btn.disabled = true; btn.textContent = 'খোঁজা হচ্ছে…';
+    google.script.run.withSuccessHandler(function (result) {
+      btn.disabled = false; btn.textContent = 'অবস্থা দেখুন';
+      const el = clearResult('trackMessage'); el.classList.add('visible');
+      text(el, 'আবেদন ID: ' + result.applicationId, true);
+      text(el, 'সেবার ধরন: ' + result.service);
+      text(el, 'অবস্থা: ' + result.status);
+      text(el, 'সর্বশেষ পরিবর্তন: ' + result.updatedAt);
+    }).withFailureHandler(function (err) { btn.disabled = false; btn.textContent = 'অবস্থা দেখুন'; failure('trackMessage', err); }).getApplicationStatus($('applicationId').value.trim(), $('trackingSecret').value.trim());
+  });
+})();
+</script>
+</body>
+</html>

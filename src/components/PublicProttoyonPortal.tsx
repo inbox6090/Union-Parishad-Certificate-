@@ -25,6 +25,7 @@ import { ApplicationStatusLookup } from './ApplicationStatusLookup';
 
 interface PublicProttoyonPortalProps {
   config: UnionParishadConfig;
+  workspaceWebAppUrl?: string;
   onStartApplication: (serviceKey?: string) => void;
   onNavigateTab: (tab: string) => void;
   onOpenCertificate?: (certId: string) => void;
@@ -32,6 +33,7 @@ interface PublicProttoyonPortalProps {
 
 export const PublicProttoyonPortal: React.FC<PublicProttoyonPortalProps> = ({
   config,
+  workspaceWebAppUrl,
   onStartApplication,
   onNavigateTab,
   onOpenCertificate
@@ -282,11 +284,22 @@ export const PublicProttoyonPortal: React.FC<PublicProttoyonPortalProps> = ({
 
       {/* 5. Application Tracking Section */}
       <div id="tracking-section">
-        <ApplicationStatusLookup
-          config={config}
-          onOpenCertificate={onOpenCertificate}
-          onStartNewApplication={() => onStartApplication()}
-        />
+        {workspaceWebAppUrl ? (
+          <section className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 p-6 text-center space-y-3">
+            <h2 className="text-xl font-black text-emerald-950 dark:text-emerald-200">Google Workspace আবেদন ট্র্যাকিং</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300">আবেদন ID এবং ব্যক্তিগত ট্র্যাকিং কোড দিয়ে নিরাপদ Google Web App-এ অবস্থা দেখুন।</p>
+            <a href={workspaceWebAppUrl + '?view=track'}
+               className="inline-block rounded-xl bg-emerald-800 hover:bg-emerald-700 px-5 py-3 text-white font-bold text-sm">
+              আবেদনের অবস্থা দেখুন
+            </a>
+          </section>
+        ) : (
+          <ApplicationStatusLookup
+            config={config}
+            onOpenCertificate={onOpenCertificate}
+            onStartNewApplication={() => onStartApplication()}
+          />
+        )}
       </div>
 
       {/* 6. FAQ Accordion Section */}
