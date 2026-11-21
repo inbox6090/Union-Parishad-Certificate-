@@ -1,0 +1,30 @@
+name: UPSM Google Workspace pilot tests
+
+on:
+  pull_request:
+    paths:
+      - 'google-workspace/**'
+      - '.github/workflows/google-workspace-pilot-tests.yml'
+  push:
+    paths:
+      - 'google-workspace/**'
+      - '.github/workflows/google-workspace-pilot-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apps-script-unit-tests:
+    name: Apps Script mocked unit and integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run pilot tests
+        run: node --test google-workspace/tests/*.test.cjs
