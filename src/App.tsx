@@ -39,6 +39,13 @@ export default function App() {
   const workspaceWebAppUrl = (import.meta.env.VITE_GOOGLE_WORKSPACE_WEBAPP_URL || '').trim();
   const googleWorkspaceEnabled = /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/.test(workspaceWebAppUrl);
   const openWorkspace = (serviceKey?: string, view?: 'track') => {
+    // This pilot intentionally supports five services; never silently relabel another
+    // certificate request as citizenship when navigating from the full legacy catalog.
+    const workspacePilotServices = ['citizenship', 'character', 'permanent_resident', 'warish', 'correction'];
+    if (serviceKey && !workspacePilotServices.includes(serviceKey)) {
+      window.alert('এই সেবাটি Google Workspace পরীক্ষামূলক ব্যবস্থায় এখনও চালু হয়নি। অনুগ্রহ করে ইউপি অফিসের সঙ্গে যোগাযোগ করুন।');
+      return;
+    }
     const url = new URL(workspaceWebAppUrl);
     if (serviceKey) url.searchParams.set('service', serviceKey);
     if (view) url.searchParams.set('view', view);
